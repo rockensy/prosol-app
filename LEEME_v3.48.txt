@@ -1,0 +1,24 @@
+PROSOL Campo v3.48 (22/11/2026) · Potenciado por ROCKENSY S.A. & MIG — Tec. Master Luis Martínez Ibáñez
+
+QUÉ ES
+1) Reporte por WhatsApp con FOTOS: si la orden tiene fotos, el botón principal es «📲 Enviar reporte con fotos por
+   WhatsApp» (miniaturas para elegir, mínimo 1; WhatsApp abre su lista de contactos y grupos). «Abrir WhatsApp (solo
+   texto)» queda como segunda opción. La línea de fotos dice lo que realmente viaja.
+2) Formato corporativo del mensaje: encabezado PROSOL, separadores, íconos por campo, actividades con ✔️ (sin repetir
+   la principal), seguimiento con tiempos y pie de identidad. En reporte final, aviso de etapa y avance parcial.
+3) M13 · Seguimiento de la orden para el CLIENTE: enlace propio por visita (seguimiento.html?t=…) que viaja en el
+   aviso de etapa, en el avance parcial y en el reporte final. La página muestra el estado (Programada → En camino →
+   En sitio → En proceso → Finalizada) con hora, las novedades que el técnico deja visibles (casilla «Visible para el
+   cliente» en cada avance) y se actualiza sola. El seguimiento TERMINA con el envío del reporte final por WhatsApp:
+   la página queda como constancia con el reporte (actividades, observaciones, horas, hasta 4 fotos elegidas, firma)
+   y «Guardar / imprimir PDF», vigente 30 días tras el cierre. Solo nombre del cliente y serie: sin teléfonos ni
+   direcciones. Con o sin señal: lo pendiente se publica solo al volver internet.
+NUBE (ya aplicado y probado; no hay que hacer nada): tabla seguimiento_cliente sin acceso directo, función
+seguimiento_guardar (escritura desde la app) y función pública «seguimiento» (lectura por enlace; la página no
+lleva ninguna clave). Lo que viaja al escritorio no cambia. Escritorio sin cambios.
+APLICACIÓN: subir el CONTENIDO de esta carpeta al repo rockensy/prosol-app (reemplaza). La app debe mostrar v3.48.
+VALIDACIÓN: Playwright 47/47 (orden guardada, fotos elegibles, WhatsApp libre, oficina por nube, M13 cierre y página
+del cliente) · 38/38 (seguimiento, avances visibles/ocultos, enlace en avisos, estados de envío, reporte final) ·
+18/18 actividades · página del cliente en curso y cerrada revisada · nube real: anon sin lectura/escritura directa,
+enlace inválido rechazado, visita cerrada no se reabre, función pública 200/404 y oculta avances no visibles.
+ESTADO: terminado y validado. Pendiente: prueba en el celular.

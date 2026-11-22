@@ -31,6 +31,7 @@ const estado = {
   contactos: [],         // M9-C: contactos WhatsApp de la nube
   waEnv: {},             // M9-D: lotes de envío WhatsApp con estado por destinatario
   envQ: [],              // M9-D: estados de envío pendientes de subir (ot_envios)
+  segQ: {},              // M13: último estado de cada seguimiento del cliente pendiente de publicar (por enlace)
   _pila: [], _pantalla: "login",
 };
 // Exponer estado y guardarLocal globalmente para que initSupabase (fuera de IIFE) pueda accederlos
@@ -79,6 +80,7 @@ async function guardarLocal() {
     await DB.set("avq::" + estado.tecnico, estado.avQ || []);
     await DB.set("waenv::" + estado.tecnico, estado.waEnv || {});
     await DB.set("envq::" + estado.tecnico, estado.envQ || []);
+    await DB.set("segq::" + estado.tecnico, estado.segQ || {});
     await DB.set("ordenes::" + estado.tecnico, estado.ordenes);
     await DB.set("envios::" + estado.tecnico, estado.envios);
     await DB.set("historial::" + estado.tecnico, estado.historial);
@@ -94,6 +96,7 @@ async function cargarLocal() {
   estado.avQ = t ? ((await DB.get("avq::" + t)) || []) : [];
   estado.waEnv = t ? ((await DB.get("waenv::" + t)) || {}) : {};
   estado.envQ = t ? ((await DB.get("envq::" + t)) || []) : [];
+  estado.segQ = t ? ((await DB.get("segq::" + t)) || {}) : {};
   estado.ordenes = t ? ((await DB.get("ordenes::" + t)) || []) : [];
   estado.envios = t ? ((await DB.get("envios::" + t)) || []) : [];
   estado.historial = t ? ((await DB.get("historial::" + t)) || []) : [];
@@ -122,7 +125,7 @@ async function cerrarSesion() {
   }
   await DB.set("tecnico", "");
   estado.tecnico = ""; estado.ordenes = []; estado.envios = []; estado.historial = [];
-  estado.seguim = {}; estado.avQ = []; estado.waEnv = {}; estado.envQ = []; estado._hfVisto = false;
+  estado.seguim = {}; estado.avQ = []; estado.waEnv = {}; estado.envQ = []; estado.segQ = {}; estado._hfVisto = false;
   refrescarSync();
   pintarLogin();
   ir("login");
@@ -954,6 +957,8 @@ function abrirOrdenHistorial(idx) {
       <div class="row-sub" style="margin-top:6px">Serie ${h.SERIE} · ${h.FECHA} · ${h.TIPO_OT || ""}</div>
       <div class="row-sub">Horas: ${h.HORAS_MAQUINA ?? "—"} · Estado: ${h._confirmada?"confirmada por oficina":(h._enviada?"enviada":"sin enviar")}</div>
       <div class="row-sub" style="white-space:normal"><b>Oficina:</b> ${ESC(estadoNubeTxt(h))}</div>
+      <div class="row-sub" style="white-space:normal"><b>Cliente:</b> ${h._segCerrado ? "🔎 seguimiento cerrado con el reporte" : "🔎 seguimiento en línea"} ·
+        <a href="${ESC(urlSeguimiento(tokenDeOT(h)))}" target="_blank" rel="noopener" style="color:var(--azul)">ver página del cliente</a></div>
     </div>
     <div class="field-label">Actividades</div>
     <div style="margin:4px 0 10px;font-size:.92rem">${acts || "—"}</div>
@@ -990,35 +995,43 @@ async function reenviarOrdenIndividual() {
 }
 // Arma un resumen legible de la orden y lo comparte a WhatsApp junto con las
 // fotos de ESA orden (un envío por orden, para no sobrecargar).
+// v3.48: formato corporativo del mensaje de WhatsApp (íconos por campo, separadores y pie de identidad)
+const SEP_WA = "━━━━━━━━━━━━━━━━━━";
+const PIE_WA = "⚙️ _PROSOL Campo · Potenciado por ROCKENSY S.A. & MIG_";
+function equipoTxtWA(serie) {
+  const e = typeof equipoPorSerie === "function" ? equipoPorSerie(serie) : null;
+  if (!e) return "";
+  return [(e.MARCA || "GENERAC") + (e.MODELO ? " " + e.MODELO : ""), Number(e.POTENCIA_KW) > 0 ? e.POTENCIA_KW + " kW" : ""].filter(Boolean).join(" · ");
+}
 function resumenOrdenTexto(h) {
   const L = [];
-  L.push("*ORDEN DE TRABAJO N° " + (h.NUMERO_OT || "—") + "*");
-  L.push("Técnico: " + (estado.tecnico || "—"));
-  L.push("Cliente: " + (h.RAZON_SOCIAL || "—"));
-  L.push("Equipo (serie): " + (h.SERIE || "—"));
-  L.push("Fecha: " + (h.FECHA || "—") + "   Tipo: " + (h.TIPO_OT || "—"));
-  if (h.HORAS_MAQUINA != null && h.HORAS_MAQUINA !== "")
-    L.push("Horas máquina: " + h.HORAS_MAQUINA);
-  L.push("");
-  L.push("*Actividades:*");
-  (h.ACTIVIDADES || []).forEach(a => {
-    const niv = a.NIVEL === "sub" ? "   - " : (a.NIVEL === "adicional" ? "➕ " : "▸ ");
-    L.push(niv + a.DESCRIPCION);
-  });
-  if (h.TRABAJO_REALIZADO) {
-    L.push("");
-    L.push("*Trabajo / observaciones:*");
-    L.push(h.TRABAJO_REALIZADO);
+  L.push("🔧 *PROSOL S.A. · Servicio Autorizado Generac*", SEP_WA);
+  L.push("📋 *ORDEN DE TRABAJO N° " + (h.NUMERO_OT || "—") + "*");
+  L.push("✅ Estado: *Trabajo finalizado*", SEP_WA);
+  L.push("👤 *Cliente:* " + (h.RAZON_SOCIAL || "—"));
+  const eq = equipoTxtWA(h.SERIE);
+  if (eq) L.push("⚡ *Equipo:* " + eq);
+  L.push("🔢 *Serie:* " + (h.SERIE || "—"));
+  L.push("📅 *Fecha:* " + (typeof fmtFecha === "function" ? fmtFecha(h.FECHA) : (h.FECHA || "—")));
+  L.push("🛠️ *Tipo:* " + (h.TIPO_OT || "—"));
+  if (h.HORAS_MAQUINA != null && h.HORAS_MAQUINA !== "") L.push("⏱️ *Horas máquina:* " + h.HORAS_MAQUINA);
+  L.push("👷 *Técnico:* " + (estado.tecnico || "—"));
+  const acts = h.ACTIVIDADES || [];
+  if (acts.length) {
+    L.push("", "🧰 *Actividades realizadas*");
+    let rubro = "";
+    acts.forEach(a => {
+      if (a.NIVEL === "rubro") { rubro = a.DESCRIPCION; L.push("▪️ *" + a.DESCRIPCION + "*"); }
+      else if (a.NIVEL === "adicional") { rubro = a.DESCRIPCION; L.push("➕ *" + a.DESCRIPCION + "*"); }
+      else if (a.DESCRIPCION !== rubro) L.push("      ✔️ " + a.DESCRIPCION);   // no repite la actividad principal
+    });
   }
-  if (h.GPS_LAT && h.GPS_LON) {
-    L.push("");
-    L.push("📍 *Ubicación del servicio:*");
-    L.push("https://maps.google.com/?q=" + h.GPS_LAT + "," + h.GPS_LON);
-  }
+  if (h.TRABAJO_REALIZADO) L.push("", "📝 *Trabajo / observaciones*", h.TRABAJO_REALIZADO);
+  if (h.GPS_LAT && h.GPS_LON) L.push("", "📍 *Ubicación del servicio*", "https://maps.google.com/?q=" + h.GPS_LAT + "," + h.GPS_LON);
   const nf = (h._fotos || []).length;
   L.push("");
-  L.push("📷 " + nf + " foto(s) adjunta(s)" + (h.FIRMA ? " · con firma del cliente" : ""));
-  L.push("— Enviado desde PROSOL Campo —");
+  L.push("📷 " + nf + " foto(s) adjunta(s)" + (h.FIRMA ? " · ✍️ con firma del cliente" : ""));
+  L.push(PIE_WA);
   return L.join("\n");
 }
 async function enviarOrdenWhatsApp() {
@@ -1772,11 +1785,19 @@ async function abrirDestinos(o) {
   }).join("") || `<p class="hint">${vacio}</p>`;
   const cli = o.cliente || {}; const telCli = numWA(cli.tel);
   const hayFiles = o.files && o.files.length;
-  $("#dest-cuerpo").innerHTML = `
-    <button class="btn btn-primary btn-block dest-wa-libre" id="dest-wa-libre">📲 Abrir WhatsApp y elegir contactos o grupos</button>
+  (estado._destUrls || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (x) { /* nada */ } });
+  estado._destUrls = hayFiles ? o.files.map(f => URL.createObjectURL(f)) : [];
+  const miniaturas = hayFiles ? `<div class="field-label" style="margin-top:4px">Fotos de la orden (marca las que van · mínimo 1)</div>
+    <div class="dest-fotos">${o.files.map((f, i) => `<label class="dest-foto"><img src="${estado._destUrls[i]}" alt="">
+      <input type="checkbox" class="dest-foto-chk" data-i="${i}" checked><span>${/_firma\./i.test(f.name) ? "Firma" : "Foto " + (i + 1)}</span></label>`).join("")}</div>
+    <p class="hint" id="dest-fotos-n" style="margin:2px 0 8px"></p>` : "";
+  $("#dest-cuerpo").innerHTML = (hayFiles ? `${miniaturas}
+    <button class="btn btn-primary btn-block dest-wa-libre" id="dest-con-fotos">📲 Enviar reporte con fotos por WhatsApp</button>
+    <p class="hint" style="margin:6px 0 8px">Se abre WhatsApp con el reporte y las fotos marcadas: eliges el contacto o grupo y pulsas Enviar.</p>
+    <button class="btn btn-ghost btn-block" id="dest-wa-libre">📲 Abrir WhatsApp (solo texto, sin fotos)</button>`
+    : `<button class="btn btn-primary btn-block dest-wa-libre" id="dest-wa-libre">📲 Abrir WhatsApp y elegir contactos o grupos</button>
     <p class="hint" style="margin:6px 0 4px">Se abre WhatsApp con el reporte listo: eliges el chat o grupo (ej. Servicio Técnico PROSOL S.A.) y pulsas Enviar.</p>
-    <button class="btn btn-ghost btn-block" id="dest-compartir">📤 ${hayFiles ? "Compartir con fotos (eliges contactos o grupos)" : "Compartir… (eliges contactos o grupos)"}</button>
-    ${hayFiles ? `<p class="hint" style="margin:6px 0 0">Las fotos viajan solo con «Compartir». WhatsApp directo manda el texto.</p>` : ""}
+    <button class="btn btn-ghost btn-block" id="dest-compartir">📤 Compartir… (eliges contactos o grupos)</button>`) + `
     <details class="dest-rapida"><summary>Lista rápida (números guardados)</summary>
     <h3 class="eq-h">1 · Grupo técnico</h3>${sec(GRUPO_TECNICO, "Aún no hay contactos. Agrégalos en Inicio → Contactos WhatsApp.")}
     <h3 class="eq-h">2 · Cliente</h3>
@@ -1789,17 +1810,37 @@ async function abrirDestinos(o) {
     </details>`;
   $("#dest-pie").innerHTML = "";
   $("#dest-enviar").onclick = armarColaDestinos;
+  // la línea de fotos del reporte dice la verdad según la vía (con fotos / solo texto)
+  const nTot = hayFiles ? o.files.length : 0;
+  const sel = () => hayFiles ? $$("#dest-cuerpo .dest-foto-chk").filter(c => c.checked).map(c => o.files[Number(c.dataset.i)]) : [];
+  o._sel = sel; o._selFijada = null;
+  const conFotos = (fs) => textoConFotos(o.texto, fs.length, fs.some(f => /_firma\./i.test(f.name)), nTot);
+  const soloTexto = () => hayFiles ? textoSinFotos(o.texto, nTot) : o.texto;
+  o._textoSolo = soloTexto();
+  if (hayFiles) {
+    const cuenta = () => { const n = sel().length; $("#dest-fotos-n").textContent = n + " de " + nTot + " seleccionada(s)"; $("#dest-con-fotos").disabled = n === 0; };
+    $$("#dest-cuerpo .dest-foto-chk").forEach(c => c.onchange = cuenta); cuenta();
+    $("#dest-con-fotos").onclick = async () => {
+      const fs = sel(); if (!fs.length) { toast("Marca al menos 1 foto.", "err"); return; }
+      if (await compartirNativo(conFotos(fs), fs, o.titulo)) {
+        registrarCompartido(o, "WhatsApp con " + fs.length + " foto(s) (contacto o grupo elegido)", "COMPARTIDO");
+        if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews();
+      }
+    };
+  } else {
+    $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, [], o.titulo)) { registrarCompartido(o); if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); } };
+  }
   $("#dest-wa-libre").onclick = () => {
-    try { window.open("https://wa.me/?text=" + encodeURIComponent(o.texto), "_blank"); } catch (x) { /* popup bloqueado */ }
+    try { window.open("https://wa.me/?text=" + encodeURIComponent(soloTexto()), "_blank"); } catch (x) { /* popup bloqueado */ }
     registrarCompartido(o, "WhatsApp (contacto o grupo elegido en WhatsApp)", "ABIERTO");
     if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews();
   };
-  $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, o.files, o.titulo)) { registrarCompartido(o); if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); } };
   $("#sheet-dest").hidden = false;
   syncContactos();
 }
 function armarColaDestinos() {
   const o = estado._dest, dest = [];
+  if (o._sel) o._selFijada = o._sel();   // la cola reemplaza las miniaturas: se guarda la selección para el cierre
   $$("#dest-cuerpo .dest-chk").forEach(c => { if (c.checked) dest.push({ nombre: c.dataset.nombre, tel: c.dataset.tel }); });
   if ($("#dest-cli") && $("#dest-cli").checked) {
     const t = numWA((o.cliente || {}).tel || ($("#dest-cli-tel") ? $("#dest-cli-tel").value : ""));
@@ -1810,7 +1851,7 @@ function armarColaDestinos() {
   if (otro) dest.push({ nombre: "Otro número", tel: otro });
   const vistos = new Set(); const unicos = dest.filter(d => !vistos.has(d.tel) && vistos.add(d.tel));
   if (!unicos.length) { toast("Marca al menos un destinatario.", "err"); return; }
-  pintarCola(nuevoLote(o, unicos), o, false);
+  pintarCola(nuevoLote(Object.assign({}, o, { texto: o._textoSolo || o.texto }), unicos), o, false);
 }
 // ---- M9-D (v3.45): estado de envío por destinatario (bitácora local + tabla ot_envios) ----
 // wa.me no informa si el mensaje salió: se registra lo que sí se sabe (Abierto en WhatsApp / Compartido / Pendiente).
@@ -1897,9 +1938,19 @@ function envBloqueHTML(lotes) {
       (p ? `<button class="btn btn-ghost env-reenv" data-lote="${ESC(L.lote)}" style="min-height:38px;margin-top:6px">📲 Reenviar a pendientes (${p})</button>` : "") + `</div>`;
   }).join("");
 }
+// línea de fotos del reporte según lo que realmente viaja
+function textoConFotos(t, n, firma, tot) {
+  return String(t).replace(/^📷 .*$/m, "📷 " + n + " foto(s) adjunta(s)" + (firma ? " · con firma del cliente" : "") + (n < tot ? " (de " + tot + " registradas en la orden)" : ""));
+}
+function textoSinFotos(t, tot) {
+  return String(t).replace(/^📷 .*$/m, "📷 " + tot + " foto(s) registradas en la orden (no van en este mensaje)");
+}
 async function compartirNativo(texto, files, titulo) {
   const d = { text: texto, title: titulo || "PROSOL" };
-  if (files && files.length) { if (navigator.canShare && navigator.canShare({ files })) d.files = files; else toast("Tu celular no adjunta archivos aquí: se comparte solo el texto.", ""); }
+  if (files && files.length) {
+    if (navigator.canShare && navigator.canShare({ files })) d.files = files;
+    else { toast("Este celular no permite adjuntar las fotos desde la app: usa «Abrir WhatsApp (solo texto)» y adjunta las fotos en el chat.", "err"); return false; }
+  }
   if (navigator.share) { try { await navigator.share(d); return true; } catch (x) { return false; } }
   try { await navigator.clipboard.writeText(texto); toast("Mensaje copiado. Pégalo en WhatsApp.", "ok"); return true; }
   catch (x) { toast("No se pudo compartir.", "err"); return false; }
@@ -1912,7 +1963,88 @@ const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmtFecha
 function segDe(key, crear) {
   estado.seguim = estado.seguim || {};
   if (!estado.seguim[key] && crear) estado.seguim[key] = { key, etapa: "PROGRAMADA", ev: [], av: [] };
-  return estado.seguim[key] || null;
+  const sg = estado.seguim[key] || null;
+  if (sg && !sg.token) sg.token = nuevoTokenSeg();
+  return sg;
+}
+// ════ M13 (v3.48): seguimiento de la orden para el CLIENTE ════
+// Enlace propio por visita (32 hex aleatorios) → página pública seguimiento.html; la app publica cada etapa y
+// avance (cola sin señal) con la función seguimiento_guardar; el cierre publica el reporte con las fotos elegidas.
+function nuevoTokenSeg() {
+  const b = new Uint8Array(16); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(b) : b.forEach((_, i) => { b[i] = Math.floor(Math.random() * 256); });
+  return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+}
+function urlSeguimiento(token) { return location.origin + location.pathname.replace(/[^/]*$/, "") + "seguimiento.html?t=" + token; }
+function tokenDeOT(h) {
+  if (h._segToken) return h._segToken;
+  const sg = sgDeOT(h);
+  h._segToken = sg ? sg.token : nuevoTokenSeg();
+  guardarLocal();
+  return h._segToken;
+}
+function datosSeg(sg, extra) {
+  const m = sg.meta || {};
+  return Object.assign({
+    clave_visita: sg.key, numero_ot: sg.numero_ot || null, serie: m.serie || null, cliente_nombre: m.cliente || null,
+    equipo_txt: m.equipo || null, tecnico: estado.tecnico, tipo_mant: m.tipoMant || null, clase: m.clase || null,
+    etapa: sg.etapa, etapas: (sg.ev || []).map(x => ({ e: x.e, t: x.t })),
+    avances: (sg.av || []).map(x => ({ t: x.t, texto: x.texto || "", n: x.n || 0, visible: x.visible !== false }))
+  }, extra || {});
+}
+function publicarSeg(token, datos) {
+  if (!token) return;
+  (estado.segQ = estado.segQ || {})[token] = datos;   // solo cuenta el último estado de cada enlace
+  guardarLocal(); syncSegCliente();
+}
+function publicarSegDeVisita(key) { const sg = segDe(key, false); if (sg) publicarSeg(sg.token, datosSeg(sg)); }
+let _segBusy = false;
+async function syncSegCliente() {
+  if (_segBusy || typeof API === "undefined" || !API.hayNube() || navigator.onLine === false) return;
+  const ks = Object.keys(estado.segQ || {}); if (!ks.length) return;
+  _segBusy = true;
+  try {
+    for (const k of ks) {
+      const d = estado.segQ[k];
+      await API.rpc("seguimiento_guardar", { p_token: k, p_datos: d });
+      if (estado.segQ[k] === d) delete estado.segQ[k];       // si cambió mientras se enviaba, se reenvía luego
+    }
+  } catch (x) { /* sin red: queda en cola */ }
+  finally { _segBusy = false; guardarLocal(); if (Object.keys(estado.segQ || {}).length && navigator.onLine !== false) setTimeout(syncSegCliente, 15000); }
+}
+// reduce una foto para la página del cliente (≈800 px, liviana)
+function reducirFoto(dataUrl, max) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => { const e = Math.min(1, (max || 800) / Math.max(img.width, img.height)); const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * e); cv.height = Math.round(img.height * e); cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      res(cv.toDataURL("image/jpeg", 0.72)); };
+    img.onerror = () => res(null); img.src = dataUrl;
+  });
+}
+// cierre: el seguimiento termina con el envío del reporte final; queda como constancia (30 días)
+async function publicarCierre(h, elegidos) {
+  const token = tokenDeOT(h), sg = sgDeOT(h);
+  const nombres = (elegidos || []).map(f => f.name);
+  const fotos = (h._fotos || []).filter(f => !/_firma\./i.test(f.nombre || ""));
+  const usar = (nombres.length ? fotos.filter(f => nombres.includes(f.nombre)) : fotos).slice(0, 4);
+  const firma = (h._fotos || []).find(f => /_firma\./i.test(f.nombre || ""));
+  const red = [];
+  for (const f of usar) { const r = await reducirFoto(f.dataUrl, 800); if (r) red.push(r); }
+  const eq = equipoTxtWA(h.SERIE);
+  const base = sg ? datosSeg(sg) : { etapas: [], avances: [], etapa: "FINALIZADA" };
+  const reporte = {
+    fecha: h.FECHA || null, tipo: h.TIPO_OT || null, horas: h.HORAS_MAQUINA ?? null,
+    actividades: (h.ACTIVIDADES || []).filter((a, i, arr) => !(a.NIVEL === "sub" && arr.some(b => b.NIVEL !== "sub" && b.DESCRIPCION === a.DESCRIPCION)))
+      .map(a => ({ d: a.DESCRIPCION, n: a.NIVEL })),
+    observaciones: h.TRABAJO_REALIZADO || "",
+    ubicacion: h.GPS_LAT && h.GPS_LON ? "https://maps.google.com/?q=" + h.GPS_LAT + "," + h.GPS_LON : null,
+    fotos: red, firma: firma ? await reducirFoto(firma.dataUrl, 500) : null
+  };
+  publicarSeg(token, Object.assign(base, {
+    numero_ot: h.NUMERO_OT || null, serie: h.SERIE || null, cliente_nombre: h.RAZON_SOCIAL || null, equipo_txt: eq || null,
+    tecnico: estado.tecnico, tipo_mant: h.TIPO_OT || null, clase: h.CLASE_VISITA || null, etapa: "FINALIZADA",
+    estado: "FINALIZADA", reporte }));
+  h._segCerrado = new Date().toISOString(); guardarLocal();
 }
 async function guardarSeg() {
   if (!estado.tecnico) return;
@@ -1929,10 +2061,14 @@ function migrarSeg(viejo, nuevo) {
   if (estado._otCtx && estado._otCtx.segKey === viejo) estado._otCtx.segKey = nuevo;
   guardarSeg();
 }
-function anotarSeg(key, serie, tipo, etapa, texto, adjuntos) {
+function anotarSeg(key, serie, tipo, etapa, texto, adjuntos, visible) {
   const sg = segDe(key, true), t = new Date().toISOString();
+  const it = estado._segIt;
+  if (it && it.k + ":" + it.id === key) sg.meta = { cliente: it.cliente, equipo: it.equipo, serie: it.serie, tipoMant: it.tipoMant, clase: it.clase };
+  else if (!sg.meta) sg.meta = { serie };
   if (tipo === "ETAPA") { sg.etapa = etapa; sg.ev.push({ e: etapa, t }); }
-  else sg.av.push({ t, texto: texto || "", n: adjuntos || 0 });
+  else sg.av.push({ t, texto: texto || "", n: adjuntos || 0, visible: visible !== false });
+  publicarSeg(sg.token, datosSeg(sg));
   (estado.avQ = estado.avQ || []).push({ fila: { serie, clave_visita: key, numero_ot: sg.numero_ot || null, tecnico: estado.tecnico, tipo, etapa: etapa || sg.etapa, texto: texto || null, adjuntos: adjuntos || 0, ocurrio: t } });
   guardarSeg(); syncAvances();
 }
@@ -1957,19 +2093,23 @@ function atenderItem(it) {
   else nuevaOT(it.e || { SERIE: it.s.serie, ID_CLIENTE: it.s.id_cliente }, it.s.tipo_mantenimiento, { clase: it.s.clase, sol: it.s, segKey: key });
 }
 function cabeceraMsg(it, titulo) {
-  return ["*PROSOL — " + titulo + "*", "Cliente: " + it.cliente, "Equipo: " + it.equipo + " · Serie " + it.serie,
-    "Tipo: " + it.tipoMant + (it.clase === "URGENTE" ? " · 🚨 URGENTE" : ""), "Técnico: " + estado.tecnico];
+  return ["🔧 *PROSOL S.A. · " + titulo + "*", SEP_WA, "👤 *Cliente:* " + it.cliente, "⚡ *Equipo:* " + it.equipo, "🔢 *Serie:* " + it.serie,
+    "🛠️ *Tipo:* " + it.tipoMant + (it.clase === "URGENTE" ? " · 🚨 *URGENTE*" : ""), "👷 *Técnico:* " + estado.tecnico, SEP_WA];
 }
 function msgEtapa(it, etapa) {
   const L = cabeceraMsg(it, "Seguimiento de servicio");
-  L.push("Estado: " + etapaTxt(etapa), "Hora: " + hhmm(new Date().toISOString()), "", "— PROSOL Campo —");
+  L.push("📌 *Estado:* " + etapaTxt(etapa), "🕒 *Hora:* " + hhmm(new Date().toISOString()));
+  const sg = segDe(it.k + ":" + it.id, true);
+  L.push("", "🔎 *Siga su servicio en línea:*", urlSeguimiento(sg.token), "", PIE_WA);
   return L.join("\n");
 }
 function msgParcial(it, texto, n) {
   const L = cabeceraMsg(it, "AVANCE PARCIAL (PRESUNTIVO)");
-  L.push("", "Detalle: " + (texto || "(ver fotos/video)"));
+  L.push("🕒 *Hora:* " + hhmm(new Date().toISOString()), "", "📝 *Detalle:* " + (texto || "(ver fotos/video)"));
   if (n) L.push("📎 " + n + " adjunto(s) en este aviso");
-  L.push("", "_Información preliminar: se confirma en el reporte final de la OT._", "— PROSOL Campo —");
+  L.push("", "⚠️ _Información preliminar: se confirma en el reporte final de la OT._");
+  const sg = segDe(it.k + ":" + it.id, true);
+  L.push("", "🔎 *Siga su servicio en línea:*", urlSeguimiento(sg.token), "", PIE_WA);
   return L.join("\n");
 }
 // M9-D (v3.45): reporte final agrupado — orden + origen/autorización + etapas con tiempos + avances + avisos enviados
@@ -1983,41 +2123,42 @@ function avancesTexto(h) {
   const sg = sgDeOT(h), L = [];
   const clase = h.CLASE_VISITA || "";
   if (clase) {
-    L.push("", "*Origen de la visita:* " + (CLASE_TXT[clase] || clase));
+    L.push("", "🗂️ *Origen de la visita:* " + (CLASE_TXT[clase] || clase) + (clase === "URGENTE" ? " 🚨" : ""));
     const s = h.SOLICITUD_ID ? (estado.solicitudes || []).find(x => String(x.id) === String(h.SOLICITUD_ID)) : null;
     if (s) {
-      if (s.solicitante) L.push("Solicitada por: " + s.solicitante);
-      if (s.motivo) L.push("Motivo: " + s.motivo);
-      if (s.estado === "AUTORIZADA") L.push("Autorizada por: " + (s.autorizado_por || "—") + (s.fecha_resolucion ? " · " + hhmm(s.fecha_resolucion) : ""));
-      else L.push("Autorización: " + (s.estado || "PENDIENTE") + (clase === "URGENTE" ? " (urgencia atendida antes de autorizar)" : ""));
+      if (s.solicitante) L.push("🙋 Solicitada por: " + s.solicitante);
+      if (s.motivo) L.push("💬 Motivo: " + s.motivo);
+      if (s.estado === "AUTORIZADA") L.push("🔓 Autorizada por: " + (s.autorizado_por || "—") + (s.fecha_resolucion ? " · " + hhmm(s.fecha_resolucion) : ""));
+      else L.push("🔒 Autorización: " + (s.estado || "PENDIENTE") + (clase === "URGENTE" ? " (urgencia atendida antes de autorizar)" : ""));
     }
   }
   if (sg && (sg.ev.length || sg.av.length)) {
-    L.push("", "*Seguimiento de la visita:*");
+    L.push("", "🕒 *Seguimiento de la visita:*");
     sg.ev.forEach(x => L.push("• " + etapaTxt(x.e) + " — " + hhmm(x.t)));
     const t1 = (e) => { const x = sg.ev.find(v => v.e === e); return x ? x.t : null; };
     const tr = t1("EN_CAMINO") && t1("EN_SITIO") ? durTxt(t1("EN_CAMINO"), t1("EN_SITIO")) : "";
     const si = t1("EN_SITIO") && t1("FINALIZADA") ? durTxt(t1("EN_SITIO"), t1("FINALIZADA")) : "";
     const tot = sg.ev.length && t1("FINALIZADA") ? durTxt(sg.ev[0].t, t1("FINALIZADA")) : "";
-    if (tr) L.push("Tiempo de traslado: " + tr);
-    if (si) L.push("Tiempo en sitio: " + si);
-    if (tot) L.push("Duración total: " + tot);
+    if (tr) L.push("🚗 Tiempo de traslado: " + tr);
+    if (si) L.push("🏠 Tiempo en sitio: " + si);
+    if (tot) L.push("⏳ Duración total: " + tot);
     if (sg.av.length) {
-      L.push("", "*Avances parciales (presuntivos):*");
+      L.push("", "🧾 *Avances parciales (presuntivos):*");
       sg.av.forEach(x => L.push("• " + hhmm(x.t) + ": " + (x.texto || "(adjuntos)") + (x.n ? " · 📎 " + x.n : "")));
     }
   }
   const av = lotesDe(sg ? sg.key : null, h.NUMERO_OT).filter(x => x.tipo !== "FINAL");
   if (av.length) {
     const tot = av.reduce((a, x) => a + x.dest.length, 0), ab = av.reduce((a, x) => a + x.dest.length - lotePend(x).length, 0);
-    L.push("", "*Avisos enviados durante la visita:* " + av.length + " · destinatarios abiertos " + ab + "/" + tot);
+    L.push("", "📲 *Avisos enviados durante la visita:* " + av.length + " · destinatarios abiertos " + ab + "/" + tot);
   }
   return L.join("\n");
 }
 function reporteFinalTexto(h) {
   const base = resumenOrdenTexto(h).split("\n"), pie = base[base.length - 1].indexOf("PROSOL Campo") >= 0 ? base.pop() : "";
   const ex = avancesTexto(h);
-  return base.join("\n") + (ex ? "\n" + ex : "") + (pie ? "\n\n" + pie : "");
+  const link = "\n\n🔎 *Reporte y seguimiento en línea:*\n" + urlSeguimiento(tokenDeOT(h));
+  return base.join("\n") + (ex ? "\n" + ex : "") + link + (pie ? "\n\n" + SEP_WA + "\n" + pie : "");
 }
 function abrirSeg(it) {
   estado._segIt = it; estado._segFiles = [];
@@ -2029,7 +2170,7 @@ function abrirSeg(it) {
   $$("#seg-etapas .seg-et").forEach(b => b.onclick = () => {
     anotarSeg(key, it.serie, "ETAPA", b.dataset.e); abrirSeg(it); pintarHoy(); toast("Etapa: " + etapaTxt(b.dataset.e), "ok");
   });
-  $("#seg-texto").value = ""; $("#seg-archivos-info").textContent = "";
+  $("#seg-texto").value = ""; $("#seg-archivos-info").textContent = ""; if ($("#seg-visible")) $("#seg-visible").checked = true;
   const log = [].concat(sg.ev.map(x => ({ t: x.t, h: etapaTxt(x.e) })), sg.av.map(x => ({ t: x.t, h: "Avance parcial" + (x.n ? " · 📎" + x.n : ""), d: x.texto })),
     lotesDe(key, sg.numero_ot).map(L => ({ t: L.t, h: "📲 " + (ENV_TIPO[L.tipo] || L.tipo) + " · abiertos " + loteResumen(L), d: lotePend(L).length ? "Pendientes: " + lotePend(L).map(d => d.nombre).join(", ") : "" }))).sort((a, b) => b.t.localeCompare(a.t));
   $("#seg-log").innerHTML = log.length ? log.map(x => `<li class="tl-item"><div class="tl-date">${ESC(hhmm(x.t))} · ${ESC(x.h)}</div>${x.d ? `<div class="tl-acts">${ESC(x.d)}</div>` : ""}</li>`).join("") : `<li class="hint">Aún sin registros.</li>`;
@@ -2038,7 +2179,9 @@ function abrirSeg(it) {
 function datosClienteIt(it) { const c = clientePorId(it.e ? it.e.ID_CLIENTE : null); return { nombre: it.cliente, tel: c ? c.TELEFONO : "" }; }
 function segAvisarEtapa() {
   const it = estado._segIt; if (!it) return;
-  const sg = segDe(it.k + ":" + it.id, false);
+  const sg = segDe(it.k + ":" + it.id, true);
+  if (!sg.meta) sg.meta = { cliente: it.cliente, equipo: it.equipo, serie: it.serie, tipoMant: it.tipoMant, clase: it.clase };
+  publicarSegDeVisita(it.k + ":" + it.id); guardarSeg();
   const et = sg ? sg.etapa : "PROGRAMADA";
   abrirDestinos({ titulo: "Avisar: " + etapaTxt(et), texto: msgEtapa(it, et), files: [], cliente: datosClienteIt(it),
     reg: { tipo: "ETAPA", key: it.k + ":" + it.id, serie: it.serie, numero_ot: sg ? sg.numero_ot : null } });
@@ -2047,7 +2190,7 @@ function segInformarParcial() {
   const it = estado._segIt; if (!it) return;
   const texto = $("#seg-texto").value.trim(), files = estado._segFiles || [];
   if (!texto && !files.length) { toast("Escribe el detalle o agrega foto/video.", "err"); return; }
-  anotarSeg(it.k + ":" + it.id, it.serie, "PARCIAL", null, texto, files.length);
+  anotarSeg(it.k + ":" + it.id, it.serie, "PARCIAL", null, texto, files.length, $("#seg-visible") ? $("#seg-visible").checked : true);
   const msg = msgParcial(it, texto, files.length);
   const sg = segDe(it.k + ":" + it.id, false);
   $("#sheet-seg").hidden = true; pintarHoy();
@@ -2079,7 +2222,10 @@ function enviarOrdenConDestinos() {
   abrirDestinos({ titulo: "Reporte final · OT " + (h.NUMERO_OT || ""), texto: reporteFinalTexto(h), files: fotosComoFiles(h),
     cliente: { nombre: h.RAZON_SOCIAL, tel: c ? c.TELEFONO : "" }, clienteDefault: true,
     reg: { tipo: "FINAL", key: sg ? sg.key : null, numero_ot: h.NUMERO_OT, serie: h.SERIE },
-    alTerminar: () => { h._enviada = true; guardarLocal(); pintarHistorial(); } });
+    alTerminar: function () {
+      h._enviada = true; guardarLocal(); pintarHistorial();
+      publicarCierre(h, this._selFijada || (this._sel ? this._sel() : []));
+    } });
 }
 
 // ---------- Listeners ----------
@@ -2105,7 +2251,7 @@ function wire() {
   };
   $("#dest-cerrar").onclick = () => { if (estado._lote) { cerrarLote(estado._lote); estado._lote = null; refrescarEnvViews(); } $("#sheet-dest").hidden = true; };
   $("#sheet-orden-body").addEventListener("click", (e) => { const b = e.target.closest(".env-reenv"); if (b) reenviarPendientes(b.dataset.lote); });
-  window.addEventListener("online", () => { syncAvances(); syncEnvios(); });
+  window.addEventListener("online", () => { syncAvances(); syncEnvios(); syncSegCliente(); });
   $("#ct-cerrar").onclick = () => { $("#sheet-contacto").hidden = true; };
   $("#ct-guardar").onclick = guardarContacto; $("#ct-quitar").onclick = quitarContacto;
   $("#btn-contacto-nuevo").onclick = () => abrirContacto(null);
@@ -2122,7 +2268,8 @@ function wire() {
     estado.envios = (await DB.get("envios::" + n)) || [];
     estado.seguim = (await DB.get("seguim::" + n)) || {}; estado.avQ = (await DB.get("avq::" + n)) || [];
     estado.waEnv = (await DB.get("waenv::" + n)) || {}; estado.envQ = (await DB.get("envq::" + n)) || [];
-    syncAvances(); syncEnvios(); syncContactos(true);
+    estado.segQ = (await DB.get("segq::" + n)) || {};
+    syncAvances(); syncEnvios(); syncContactos(true); syncSegCliente();
     if (window._prosolSubirPendientes) setTimeout(() => window._prosolSubirPendientes({ silencioso: true }), 800);
     await guardarLocal();
     ir("inicio");
@@ -2280,7 +2427,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.47";
+const APP_VERSION = "v3.48";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2291,7 +2438,7 @@ async function init() {
   ir(estado.tecnico ? "inicio" : "login");
   pintarLogin();
   if (estado.tecnico) setTimeout(mostrarHoyFlotante, 600);
-  setTimeout(() => syncContactos(true), 1200);
+  setTimeout(() => { syncContactos(true); syncSegCliente(); }, 1200);
   escucharArchivosEntrantes();
   await revisarArchivoCompartido();
   // Aviso al cerrar/recargar si hay órdenes sin empaquetar o archivos sin enviar
