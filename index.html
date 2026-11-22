@@ -363,6 +363,31 @@
   </div>
 </div>
 
+<!-- Hoja modal: completar datos del equipo (M9-A) -->
+<div class="sheet" id="sheet-eq-edit" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>Completar datos · <span id="eqe-titulo"></span></h2>
+      <button class="sheet-close" id="sheet-eq-edit-close">✕</button>
+    </div>
+    <div style="overflow:auto">
+      <label class="field"><span class="field-label">Modelo</span>
+        <input id="eqe-modelo" type="text" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Potencia (kW)</span>
+        <input id="eqe-kw" type="text" inputmode="decimal" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Voltaje</span>
+        <input id="eqe-voltaje" type="text" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Ubicación</span>
+        <input id="eqe-ubic" type="text" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Observación</span>
+        <textarea id="eqe-obs"></textarea></label>
+      <p class="hint">Los datos en gris ya los cargó oficina y no se editan aquí.
+        Lo que completes se guarda en la nube y lo ven todos los técnicos.</p>
+    </div>
+    <button class="btn btn-primary btn-block" id="eqe-guardar" style="margin-top:10px">Guardar</button>
+  </div>
+</div>
+
 <!-- Hoja modal: elegir equipo -->
 <div class="sheet" id="sheet-equipo" hidden>
   <div class="sheet-card">

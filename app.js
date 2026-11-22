@@ -222,8 +222,49 @@ async function cargarCatalogo(file) {
 }
 
 // ---------- Equipos / clientes ----------
+// ---------- Equipos (M9-A): cliente, resumen de visitas y ficha completa ----------
+const ESC = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function fmtFecha(f) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || "");
+  return m ? m[3] + "/" + m[2] + "/" + m[1] : (f || "—");
+}
+// El cliente puede venir referenciado por código de escritorio (CLI-0072) o por el
+// UUID de la nube (equipos.id_cliente). El índice acepta ambos.
+let _idxCli = { ref: null, map: null };
 function clientePorId(id) {
-  return (estado.catalogo?.clientes || []).find(c => c.ID_CLIENTE === id) || null;
+  if (!id) return null;
+  const arr = estado.catalogo?.clientes || [];
+  if (_idxCli.ref !== arr) {
+    const m = new Map();
+    arr.forEach(c => { if (c.ID_CLIENTE) m.set(c.ID_CLIENTE, c); if (c.ID_SB) m.set(c.ID_SB, c); });
+    _idxCli = { ref: arr, map: m };
+  }
+  return _idxCli.map.get(id) || null;
+}
+// Historial indexado por serie, de la visita más reciente a la más antigua.
+let _idxHist = { ref: null, map: null };
+function historialDeSerie(serie) {
+  const arr = estado.catalogo?.historial_ot || [];
+  if (_idxHist.ref !== arr) {
+    const m = new Map();
+    arr.forEach(o => { const k = o.SERIE || ""; if (!m.has(k)) m.set(k, []); m.get(k).push(o); });
+    m.forEach(v => v.sort((a, b) => (b.FECHA || "").localeCompare(a.FECHA || "")));
+    _idxHist = { ref: arr, map: m };
+  }
+  return _idxHist.map.get(serie || "") || [];
+}
+function resumenEquipo(e) {
+  const h = historialDeSerie(e.SERIE);
+  const conHoras = h.find(o => Number(o.HORAS_MAQUINA) > 0) || null;
+  let horas = null, horasFecha = null;
+  if (conHoras) { horas = Number(conHoras.HORAS_MAQUINA); horasFecha = conHoras.FECHA; }
+  else if (Number(e.HORAS_OPERACION) > 0) { horas = Number(e.HORAS_OPERACION); }
+  return { total: h.length, ult: h[0] || null, horas, horasFecha };
+}
+function tituloEquipo(e) {
+  const kw = Number(e.POTENCIA_KW) > 0 ? " · " + Number(e.POTENCIA_KW) + " kW" : "";
+  return ([e.MARCA, e.MODELO].filter(Boolean).join(" ") || "Equipo") + kw;
 }
 function equiposFiltrados(q) {
   const eqs = estado.catalogo?.equipos || [];
@@ -231,7 +272,7 @@ function equiposFiltrados(q) {
   if (!q) return eqs;
   return eqs.filter(e => {
     const cli = clientePorId(e.ID_CLIENTE);
-    return [e.SERIE, e.MARCA, e.MODELO, cli?.RAZON_SOCIAL]
+    return [e.SERIE, e.CODIGO, e.MARCA, e.MODELO, e.POTENCIA_KW, cli?.RAZON_SOCIAL]
       .filter(Boolean).join(" ").toLowerCase().includes(q);
   });
 }
@@ -247,42 +288,150 @@ function pintarEquipos() {
   cont.innerHTML = "";
   eqs.slice(0, 500).forEach(e => {
     const cli = clientePorId(e.ID_CLIENTE);
+    const r = resumenEquipo(e);
     const li = document.createElement("li");
     li.className = "tw-row";
-    li.innerHTML = `<span class="tw-c1">${e.SERIE || "—"}</span>
+    li.innerHTML = `<span class="tw-c1">${ESC(e.SERIE) || "—"}</span>
       <span class="tw-c2">
-        <div class="t2-main">${[e.MARCA, e.MODELO].filter(Boolean).join(" ") || "Equipo"}</div>
-        <div class="t2-sub">${cli?.RAZON_SOCIAL || "—"}</div>
+        <div class="t2-main">${ESC(tituloEquipo(e))}</div>
+        <div class="t2-sub">${ESC(cli?.RAZON_SOCIAL) || "—"}</div>
+        <div class="t2-sub t2-ult">${r.ult ? "Últ. visita " + fmtFecha(r.ult.FECHA) : "Sin visitas registradas"}</div>
       </span>`;
     li.onclick = () => abrirEquipo(e);
     cont.appendChild(li);
   });
   if (!eqs.length) cont.innerHTML = `<li class="tw-empty">Sin coincidencias.</li>`;
+  // Catálogo viejo (anterior a M9-A): sin vínculo de clientes → se vuelve a bajar una vez.
+  if (estado.catalogo.rev !== 2 && navigator.onLine && !pintarEquipos._auto
+      && window._prosolSincronizarCatalogoSupabase && typeof API !== "undefined" && API.hayNube()) {
+    pintarEquipos._auto = true;
+    toast("Actualizando catálogo para mostrar clientes…", "");
+    window._prosolSincronizarCatalogoSupabase().then(() => pintarEquipos());
+  }
 }
 
-function historialDeSerie(serie) {
-  return (estado.catalogo?.historial_ot || []).filter(o => (o.SERIE || "") === serie);
+function filaDato(k, v) {
+  const vacio = v === null || v === undefined || String(v).trim() === "";
+  return `<div class="eq-k">${ESC(k)}</div><div class="eq-v${vacio ? " vacio" : ""}">${vacio ? "—" : ESC(v)}</div>`;
 }
 function abrirEquipo(e) {
   estado._equipoActual = e;
   const cli = clientePorId(e.ID_CLIENTE);
+  const r = resumenEquipo(e);
   $("#eq-titulo").textContent = "Serie " + (e.SERIE || "—");
+  const tel = (cli?.TELEFONO || "").replace(/[^\d+]/g, "");
+  const dirTxt = [cli?.DIRECCION, e.UBICACION, cli?.CIUDAD].filter(Boolean).join(", ");
+  const mapa = dirTxt ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(dirTxt) : "";
+  const ult = r.ult;
   $("#eq-datos").innerHTML = `
-    <div class="row-title">${[e.MARCA, e.MODELO].filter(Boolean).join(" ") || "Equipo"}</div>
-    <div class="row-sub">Cliente: ${cli?.RAZON_SOCIAL || "—"}</div>
-    <div class="row-sub">Ubicación: ${e.UBICACION || "—"} · Horas: ${e.HORAS_OPERACION ?? "—"}</div>`;
-  const hist = historialDeSerie(e.SERIE).sort((a, b) => (b.FECHA || "").localeCompare(a.FECHA || ""));
+    <div class="row-title">${ESC(tituloEquipo(e))}</div>
+    <div class="eq-cli">${ESC(cli?.RAZON_SOCIAL) || "Cliente no registrado"}</div>
+    <div class="eq-acciones">
+      ${tel ? `<a class="btn btn-ghost" href="tel:${ESC(tel)}">📞 Llamar</a>` : ""}
+      ${mapa ? `<a class="btn btn-ghost" href="${ESC(mapa)}" target="_blank" rel="noopener">🧭 Cómo llegar</a>` : ""}
+    </div>
+    <h3 class="eq-h">Seguimiento</h3>
+    <div class="eq-grid">
+      ${filaDato("Última lectura de horas", r.horas != null ? r.horas + " h" + (r.horasFecha ? " · " + fmtFecha(r.horasFecha) : "") : "")}
+      ${filaDato("Última visita", ult ? fmtFecha(ult.FECHA) + " · OT " + (ult.NUMERO_OT || "—") : "")}
+      ${filaDato("Tipo realizado", ult ? (ult.TIPO_OT || "") : "")}
+      ${filaDato("Visitas registradas", r.total)}
+    </div>
+    <h3 class="eq-h">Datos del equipo</h3>
+    <div class="eq-grid">
+      ${filaDato("Serie", e.SERIE)}
+      ${filaDato("Código", e.CODIGO)}
+      ${filaDato("Marca", e.MARCA)}
+      ${filaDato("Modelo", e.MODELO)}
+      ${filaDato("Potencia", Number(e.POTENCIA_KW) > 0 ? e.POTENCIA_KW + " kW" : "")}
+      ${filaDato("Voltaje", e.VOLTAJE)}
+      ${filaDato("Combustible", e.COMBUSTIBLE)}
+      ${filaDato("Ubicación", e.UBICACION)}
+      ${filaDato("Estado", e.ESTADO)}
+      ${filaDato("Observación", e.OBSERVACION)}
+    </div>
+    <h3 class="eq-h">Cliente</h3>
+    <div class="eq-grid">
+      ${filaDato("Contacto", cli?.CONTACTO)}
+      ${filaDato("Teléfono", cli?.TELEFONO)}
+      ${filaDato("Ciudad", cli?.CIUDAD)}
+      ${filaDato("Dirección", cli?.DIRECCION)}
+    </div>
+    <button class="btn btn-ghost btn-block" id="btn-eq-editar" style="margin-top:12px">✎ Completar datos del equipo</button>`;
+  $("#btn-eq-editar").onclick = abrirEdicionEquipo;
+  const hist = historialDeSerie(e.SERIE);
   const ul = $("#eq-historial"); ul.innerHTML = "";
   $("#eq-hist-vacio").hidden = hist.length > 0;
   hist.slice(0, 60).forEach(o => {
     const li = document.createElement("li"); li.className = "tl-item";
     const acts = (o.ACTIVIDADES || []).slice(0, 4).join(", ");
-    li.innerHTML = `<div class="tl-date">${o.FECHA || "—"} · OT ${o.NUMERO_OT || "—"}</div>
-      <div class="tl-meta">${o.TIPO_OT || ""} · ${o.ESTADO || ""}</div>
-      ${acts ? `<div class="tl-acts">${acts}</div>` : ""}`;
+    const hrs = Number(o.HORAS_MAQUINA) > 0 ? " · " + Number(o.HORAS_MAQUINA) + " h" : "";
+    li.innerHTML = `<div class="tl-date">${fmtFecha(o.FECHA)} · OT ${ESC(o.NUMERO_OT) || "—"}</div>
+      <div class="tl-meta">${ESC(o.TIPO_OT)} · ${ESC(o.ESTADO)}${hrs}</div>
+      ${acts ? `<div class="tl-acts">${ESC(acts)}</div>` : ""}`;
     ul.appendChild(li);
   });
   ir("equipo-detalle");
+}
+
+// ---------- Completar datos del equipo desde el móvil (M9-A) ----------
+// Lo que oficina ya cargó (_OF) prevalece y queda de solo lectura; el técnico
+// solo completa vacíos. Se guarda en equipos_campo (la nube) y, sin señal, queda en cola.
+const CAMPOS_EDIT = [
+  ["MODELO", "eqe-modelo", "modelo"], ["POTENCIA_KW", "eqe-kw", "potencia_kw"],
+  ["VOLTAJE", "eqe-voltaje", "voltaje"], ["UBICACION", "eqe-ubic", "ubicacion"],
+  ["OBSERVACION", "eqe-obs", "observacion"],
+];
+function abrirEdicionEquipo() {
+  const e = estado._equipoActual; if (!e) return;
+  const of = e._OF || [];
+  CAMPOS_EDIT.forEach(([col, id]) => {
+    const el = $("#" + id);
+    el.value = e[col] ?? "";
+    el.readOnly = of.indexOf(col) >= 0;
+    el.parentElement.classList.toggle("bloq", el.readOnly);
+  });
+  $("#eqe-titulo").textContent = "Serie " + (e.SERIE || "");
+  $("#sheet-eq-edit").hidden = false;
+}
+const COLA_EQ = "prosol_eqcampo_cola";
+function leerColaEq() { try { return JSON.parse(localStorage.getItem(COLA_EQ) || "{}"); } catch (x) { return {}; } }
+function escribirColaEq(c) { try { localStorage.setItem(COLA_EQ, JSON.stringify(c)); } catch (x) { /* sin almacenamiento */ } }
+async function subirEdicionesEquipo() {
+  const cola = leerColaEq(); const series = Object.keys(cola);
+  if (!series.length || typeof API === "undefined" || !API.hayNube() || !navigator.onLine) return 0;
+  let ok = 0;
+  for (const serie of series) {
+    try {
+      const it = cola[serie];
+      const ya = await API.select("equipos_campo", { serie });
+      const fila = Object.assign({}, it.d, { actualizado_por: it.por || "", actualizado: new Date().toISOString() });
+      if (ya && ya.length) await API.update("equipos_campo", ya[0].id, fila);
+      else await API.insert("equipos_campo", Object.assign({ serie, id_equipo: it.id_sb || null }, fila));
+      const c2 = leerColaEq(); delete c2[serie]; escribirColaEq(c2); ok++;
+    } catch (x) { /* queda en cola para el próximo intento */ }
+  }
+  return ok;
+}
+window._prosolSubirEdicionesEquipo = subirEdicionesEquipo;
+async function guardarDatosEquipo() {
+  const e = estado._equipoActual; if (!e) return;
+  const of = e._OF || [];
+  const d = {};
+  CAMPOS_EDIT.forEach(([col, id, nube]) => {
+    if (of.indexOf(col) >= 0) return;               // lo de oficina no se toca
+    let v = $("#" + id).value.trim();
+    if (col === "POTENCIA_KW") { v = v === "" ? null : Number(String(v).replace(",", ".")); if (v !== null && !(v >= 0)) v = null; }
+    e[col] = v === null ? e[col] : v; d[nube] = v === "" ? null : v;
+  });
+  const cola = leerColaEq();
+  cola[e.SERIE] = { d: Object.assign((cola[e.SERIE] || {}).d || {}, d), por: estado.tecnico, id_sb: e.ID_SB || null };
+  escribirColaEq(cola);
+  await guardarLocal();
+  $("#sheet-eq-edit").hidden = true;
+  abrirEquipo(e);
+  const n = await subirEdicionesEquipo();
+  toast(n ? "Datos guardados en la nube." : "Guardado en tu teléfono; se subirá cuando haya señal.", n ? "ok" : "");
 }
 
 // ---------- Geolocalización de la orden ----------
@@ -1027,6 +1176,8 @@ function wire() {
   if ($("#btn-orden-whatsapp")) $("#btn-orden-whatsapp").onclick = enviarOrdenWhatsApp;
   if ($("#btn-orden-confirmar")) $("#btn-orden-confirmar").onclick = toggleConfirmada;
   $("#btn-ot-desde-eq").onclick = () => nuevaOT(estado._equipoActual);
+  if ($("#sheet-eq-edit-close")) $("#sheet-eq-edit-close").onclick = () => $("#sheet-eq-edit").hidden = true;
+  if ($("#eqe-guardar")) $("#eqe-guardar").onclick = guardarDatosEquipo;
   $("#btn-nueva-ot").onclick = () => {
     if (!estado.catalogo) { toast("Primero carga el catálogo de oficina.", "err"); return; }
     nuevaOT(null);
@@ -1282,14 +1433,17 @@ function initSupabase() {
     toastG('☁ Sincronizando catálogo desde Supabase…', 'ok');
     try {
       toastG('☁ Descargando las 6 tablas desde Supabase…', '');
-      const [eq, cli, tec, prog, acts, actItems, ots] = await Promise.all([
+      // M9-A: primero se suben los datos de equipo completados en el móvil
+      if (window._prosolSubirEdicionesEquipo) { try { await window._prosolSubirEdicionesEquipo(); } catch (x) {} }
+      const [eq, cli, tec, prog, acts, actItems, ots, eqCampo] = await Promise.all([
         API.select('equipos').catch(() => []),
         API.select('clientes').catch(() => []),
         API.select('tecnicos').catch(() => []),
         API.select('visitas_programadas').catch(() => []),
         API.select('actividades').catch(() => []),
         API.select('actividad_items').catch(() => []),
-        API.select('ordenes').catch(() => [])
+        API.select('ordenes').catch(() => []),
+        API.select('equipos_campo').catch(() => [])
       ]);
 
       const _e = window._prosolEstado;
@@ -1297,21 +1451,44 @@ function initSupabase() {
       if (!_e.catalogo) _e.catalogo = {};
 
       // 1. Equipos
-      _e.catalogo.equipos = eq.map(e => ({
-        ID_EQUIPO: e.id_escritorio || e.id,
-        SERIE: e.serie || '', CODIGO: e.codigo || '',
-        ID_CLIENTE: e.id_cliente, MARCA: e.marca || 'GENERAC',
-        MODELO: e.modelo || '', POTENCIA_KW: e.potencia_kw,
-        UBICACION: e.ubicacion || '', ESTADO: e.estado || 'ACTIVO',
-        NOMBRE_EQUIPO: (e.marca||'GENERAC') + ' ' + (e.modelo||e.serie||'')
-      }));
+      // Oficina (tabla equipos) prevalece; lo completado en el móvil (equipos_campo)
+      // solo rellena vacíos. _OF = campos que oficina ya tiene cargados (solo lectura en el móvil).
+      const campoPorSerie = {};
+      eqCampo.forEach(c => { if (c.serie) campoPorSerie[c.serie] = c; });
+      const _txt = x => x !== null && x !== undefined && String(x).trim() !== '';
+      _e.catalogo.equipos = eq.map(e => {
+        const ov = campoPorSerie[e.serie] || {}, OF = [];
+        const elegir = (col, base, extra, num) => {
+          const hay = num ? Number(base) > 0 : _txt(base);
+          if (hay) { OF.push(col); return base; }
+          const ok = num ? Number(extra) > 0 : _txt(extra);
+          return ok ? extra : (num ? null : '');
+        };
+        const modelo = elegir('MODELO', e.modelo, ov.modelo);
+        const kw = elegir('POTENCIA_KW', e.potencia_kw, ov.potencia_kw, true);
+        const volt = elegir('VOLTAJE', e.voltaje, ov.voltaje);
+        const ubic = elegir('UBICACION', e.ubicacion, ov.ubicacion);
+        const obs = elegir('OBSERVACION', e.observacion, ov.observacion);
+        return {
+          ID_EQUIPO: e.id_escritorio || e.id, ID_SB: e.id,
+          SERIE: e.serie || '', CODIGO: e.codigo || '',
+          ID_CLIENTE: e.id_cliente, MARCA: e.marca || 'GENERAC',
+          MODELO: modelo, POTENCIA_KW: kw, VOLTAJE: volt,
+          COMBUSTIBLE: e.combustible || '', HORAS_OPERACION: e.horas_operacion,
+          UBICACION: ubic, OBSERVACION: obs, ESTADO: e.estado || 'ACTIVO',
+          NOMBRE_EQUIPO: (e.marca||'GENERAC') + ' ' + (modelo||e.serie||''),
+          _OF: OF
+        };
+      });
 
       // 2. Clientes
       _e.catalogo.clientes = cli.map(c2 => ({
-        ID_CLIENTE: c2.id_escritorio || c2.id,
+        ID_CLIENTE: c2.id_escritorio || c2.id, ID_SB: c2.id,
         RAZON_SOCIAL: c2.razon_social || '',
         CONTACTO: c2.contacto || '', TELEFONO: c2.telefono || '',
-        CIUDAD: c2.ciudad || '', CIUDAD_EQUIPO: c2.ciudad || ''
+        CIUDAD: c2.ciudad || '', CIUDAD_EQUIPO: c2.ciudad || '',
+        IDENTIFICACION: c2.identificacion || '', EMAIL: c2.email || '',
+        ZONA: c2.zona || '', DIRECCION: c2.direccion || ''
       }));
 
       // 3. Técnicos
@@ -1382,6 +1559,7 @@ function initSupabase() {
       }));
 
       _e.catalogo.generado = new Date().toISOString().slice(0, 10);
+      _e.catalogo.rev = 2;   // M9-A: clientes vinculados por UUID y por código
       _e.catalogo.resumen = {
         equipos: eq.length, clientes: cli.length,
         tecnicos: tec.length, programaciones: prog.length,
