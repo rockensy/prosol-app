@@ -41,7 +41,9 @@
   const cuerpo = (o, tecnico) => ({
     numero_ot: o.NUMERO_OT || '', fecha: o.FECHA || null, serie: o.SERIE || '',
     cliente_nombre: o.RAZON_SOCIAL || '', tipo_ot: o.TIPO_OT || 'PREVENTIVO', estado: o.ESTADO || 'REALIZADO',
-    trabajo_realizado: o.TRABAJO_REALIZADO || '', observaciones: '', horas_maquina: o.HORAS_MAQUINA || null,
+    trabajo_realizado: o.TRABAJO_REALIZADO || '',
+    observaciones: o.CLASE_VISITA === 'URGENTE' ? '[URGENTE]' : o.CLASE_VISITA === 'NO_PROGRAMADA' ? '[NO PROGRAMADA]' : '',
+    clase_visita: o.CLASE_VISITA || null, horas_maquina: o.HORAS_MAQUINA || null,
     gps_lat: o.GPS_LAT || null, gps_lng: o.GPS_LON || null,
     gps_link: (o.GPS_LAT && o.GPS_LON) ? 'https://maps.google.com/?q=' + o.GPS_LAT + ',' + o.GPS_LON : null,
     firma_realiza: tecnico || '', origen: 'CAMPO'

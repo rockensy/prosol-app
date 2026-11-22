@@ -52,7 +52,7 @@
     <span class="brand">PROSOL</span><span class="brand-sub">Campo</span>
   </div>
   <div class="syncbar-right">
-    <button id="chip-catalogo" class="chip" data-go="inicio">
+    <button id="chip-catalogo" class="chip" data-go="oficina">
       <span class="chip-dot" id="dot-catalogo"></span>
       <span id="chip-catalogo-txt">Sin catálogo</span>
     </button>
@@ -107,7 +107,7 @@
   </section>
 
   <!-- PANTALLA: INICIO / ESTADO -->
-  <section class="screen" data-screen="inicio">
+  <section class="screen" data-screen="oficina">
     <div class="hero">
       <p class="hero-eyebrow">Tu jornada · <span id="hero-tecnico"></span></p>
       <h1 class="hero-num"><span id="hero-pend">0</span><small>órdenes por enviar</small></h1>
@@ -117,19 +117,9 @@
     </div>
 
     <div class="actions-grid">
-      <button class="tile tile-primary" id="btn-nueva-ot">
-        <span class="tile-ic">＋</span><span class="tile-tx">Nueva orden</span></button>
-      <button class="tile" data-go="programaciones">
-        <span class="tile-ic">📅</span><span class="tile-tx">Programadas</span>
-        <span class="tile-badge" id="badge-prog">0</span></button>
-      <button class="tile" data-go="equipos">
-        <span class="tile-ic">🔧</span><span class="tile-tx">Equipos</span></button>
-      <button class="tile" data-go="enviar">
+      <button class="tile tile-primary" data-go="enviar">
         <span class="tile-ic">📤</span><span class="tile-tx">Enviar a oficina</span>
         <span class="tile-badge" id="badge-pend">0</span></button>
-      <button class="tile" data-go="historial">
-        <span class="tile-ic">🗂️</span><span class="tile-tx">Mis órdenes</span>
-        <span class="tile-badge" id="badge-hist" style="background:var(--azul)">0</span></button>
     </div>
 
     <div class="card" id="envio-estado" hidden>
@@ -157,6 +147,55 @@
       <p class="hint">El botón azul descarga el catálogo más reciente que oficina publicó
         (necesitas internet). El de archivo sirve si te lo pasaron por WhatsApp.</p>
       <p class="hint" id="app-version" style="text-align:center;opacity:.6;margin-top:10px">Versión —</p>
+    </div>
+  </section>
+
+  <!-- PANTALLA: HOY (M9-B) -->
+  <section class="screen" data-screen="hoy">
+    <div class="screen-head">
+      <h1>Hoy</h1><span class="hoy-fecha" id="hoy-fecha"></span>
+    </div>
+    <div id="hoy-contenido"></div>
+    <button class="btn btn-ghost btn-block" data-go="programaciones" style="margin-top:14px">
+      Ver todas las programadas</button>
+  </section>
+
+  <!-- PANTALLA: NUEVA VISITA no programada / urgente (M9-B) -->
+  <section class="screen" data-screen="nueva-visita">
+    <div class="screen-head">
+      <button class="back" data-go="hoy">‹</button>
+      <h1>Nueva visita</h1>
+    </div>
+    <label class="field">
+      <span class="field-label">Equipo (por serie)</span>
+      <input id="nv-serie" type="text" placeholder="Toca para elegir" readonly>
+      <button class="field-btn" id="btn-nv-elegir">Elegir</button>
+      <button class="field-btn" id="btn-nv-qr">⛶ QR</button>
+    </label>
+    <p class="ot-cliente" id="nv-cliente"></p>
+    <div class="card" id="nv-progs" hidden>
+      <h2 class="card-h">Este equipo tiene visitas programadas</h2>
+      <p class="card-sub">Si vas a atender una de ellas, tócala. Si es otra visita, completa abajo.</p>
+      <div id="nv-progs-lista"></div>
+    </div>
+    <span class="field-label">Otra visita</span>
+    <div class="nv-clases">
+      <label class="nv-clase"><input type="radio" name="nv-clase" value="NO_PROGRAMADA" checked>
+        <b>No programada</b><small>Visita que no estaba en la agenda. El supervisor la autoriza y queda en tu lista.</small></label>
+      <label class="nv-clase urg"><input type="radio" name="nv-clase" value="URGENTE">
+        <b>🚨 Urgente</b><small>Emergencia: la atiendes de inmediato y se autoriza después.</small></label>
+    </div>
+    <label class="field">
+      <span class="field-label">Tipo de mantenimiento</span>
+      <select id="nv-tipo"></select>
+    </label>
+    <label class="field">
+      <span class="field-label">Motivo</span>
+      <textarea id="nv-motivo" placeholder="Ej. El cliente reporta que no arranca"></textarea>
+    </label>
+    <div class="sticky-foot two">
+      <button class="btn btn-ghost" data-go="hoy">Cancelar</button>
+      <button class="btn btn-primary" id="btn-nv-crear">Solicitar autorización</button>
     </div>
   </section>
 
@@ -345,6 +384,15 @@
   </section>
 
 </main>
+
+<!-- Barra inferior (M9-B) -->
+<button id="fab-visita" class="fab" hidden>＋ Visita no programada / urgente</button>
+<nav id="tabbar" class="tabbar" hidden>
+  <button data-go="hoy" data-tab="hoy"><span class="tb-ic">📅</span><span>Hoy</span><i id="tab-badge-hoy" hidden>0</i></button>
+  <button data-go="equipos" data-tab="equipos"><span class="tb-ic">🔧</span><span>Equipos</span></button>
+  <button data-go="historial" data-tab="historial"><span class="tb-ic">🗂️</span><span>Mis órdenes</span></button>
+  <button data-go="oficina" data-tab="oficina"><span class="tb-ic">📤</span><span>Oficina</span><i id="tab-badge-oficina" hidden>0</i></button>
+</nav>
 
 <!-- Hoja modal: detalle de orden del historial -->
 <div class="sheet" id="sheet-orden" hidden>

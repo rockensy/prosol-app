@@ -25,6 +25,7 @@ const estado = {
   edit: null,
   fotos: [],
   actividades: [],
+  solicitudes: [],       // M9-B: visitas no programadas / urgentes
 };
 // Exponer estado y guardarLocal globalmente para que initSupabase (fuera de IIFE) pueda accederlos
 window._prosolEstado = estado;
@@ -65,6 +66,7 @@ const DB = {
 async function guardarLocal() {
   await DB.set("tecnico", estado.tecnico);
   await DB.set("catalogo", estado.catalogo);
+  await DB.set("solicitudes", estado.solicitudes);
   if (estado.tecnico) {
     await DB.set("ordenes::" + estado.tecnico, estado.ordenes);
     await DB.set("envios::" + estado.tecnico, estado.envios);
@@ -74,6 +76,7 @@ async function guardarLocal() {
 async function cargarLocal() {
   estado.tecnico = (await DB.get("tecnico")) || "";
   estado.catalogo = (await DB.get("catalogo")) || null;
+  estado.solicitudes = (await DB.get("solicitudes")) || [];
   const t = estado.tecnico;
   estado.ordenes = t ? ((await DB.get("ordenes::" + t)) || []) : [];
   estado.envios = t ? ((await DB.get("envios::" + t)) || []) : [];
@@ -119,7 +122,10 @@ function uid(n = 12) {
   for (let i = 0; i < n; i++) s += c[Math.floor(Math.random() * 16)];
   return s;
 }
-function hoyISO() { return new Date().toISOString().slice(0, 10); }
+function hoyISO() {       // fecha LOCAL (en Ecuador, desde las 19:00 la fecha UTC ya es la de mañana)
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
 function toast(msg, tipo = "") {
   const t = $("#toast"); t.textContent = msg; t.className = "toast " + tipo;
   t.hidden = false; clearTimeout(toast._t);
@@ -127,14 +133,25 @@ function toast(msg, tipo = "") {
 }
 
 // ---------- Navegación ----------
+// Pestañas inferiores: pantallas que cuelgan de cada una. Sin barra en login, nueva-ot,
+// equipo-detalle y nueva-visita (tienen su propio pie con botones).
+const TAB_DE = { hoy: "hoy", programaciones: "hoy", equipos: "equipos", historial: "historial", oficina: "oficina", enviar: "oficina" };
 function ir(nombre) {
+  if (nombre === "inicio") nombre = "hoy";
   $$(".screen").forEach(s => s.classList.toggle("active", s.dataset.screen === nombre));
   window.scrollTo(0, 0);
+  const tb = $("#tabbar");
+  if (tb) {
+    tb.hidden = !(nombre in TAB_DE);
+    $$("button", tb).forEach(b => b.classList.toggle("on", b.dataset.tab === TAB_DE[nombre]));
+  }
+  const fab = $("#fab-visita"); if (fab) fab.hidden = !(nombre === "hoy" && estado.catalogo);
   if (nombre === "equipos") pintarEquipos();
   if (nombre === "programaciones") pintarProgramaciones();
   if (nombre === "enviar") pintarPendientes();
   if (nombre === "historial") pintarHistorial();
-  if (nombre === "inicio") pintarInicio();
+  if (nombre === "oficina") pintarInicio();
+  if (nombre === "hoy") { pintarHoy(); syncSolicitudes(); }
 }
 
 // ---------- Sincronización visual ----------
@@ -147,10 +164,16 @@ function refrescarSync() {
   } else { dot.classList.remove("ok"); txt.textContent = "Sin catálogo"; }
   const n = estado.ordenes.length;
   $("#chip-pend-num").textContent = n;
-  $("#badge-pend").textContent = n;
-  $("#hero-pend").textContent = n;
-  $("#badge-prog").textContent = cat ? (cat.programaciones || []).length : 0;
-  const bh = $("#badge-hist"); if (bh) bh.textContent = estado.historial.length;
+  const set = (id, v) => { const el = $("#" + id); if (el) el.textContent = v; };
+  set("badge-pend", n); set("hero-pend", n); set("badge-hist", estado.historial.length);
+  // insignias de las pestañas
+  const tbO = $("#tab-badge-oficina"); if (tbO) { tbO.textContent = n; tbO.hidden = !n; }
+  const tbH = $("#tab-badge-hoy");
+  if (tbH) {
+    let c = 0;
+    if (cat && estado.tecnico) { const a = agendaHoy(); c = esSup() ? a.porAutorizar.length + a.urgentes.length : a.urgentes.length + a.hoy.length; }
+    tbH.textContent = c; tbH.hidden = !c;
+  }
 }
 
 function pintarInicio() {
@@ -301,13 +324,7 @@ function pintarEquipos() {
     cont.appendChild(li);
   });
   if (!eqs.length) cont.innerHTML = `<li class="tw-empty">Sin coincidencias.</li>`;
-  // Catálogo viejo (anterior a M9-A): sin vínculo de clientes → se vuelve a bajar una vez.
-  if (estado.catalogo.rev !== 2 && navigator.onLine && !pintarEquipos._auto
-      && window._prosolSincronizarCatalogoSupabase && typeof API !== "undefined" && API.hayNube()) {
-    pintarEquipos._auto = true;
-    toast("Actualizando catálogo para mostrar clientes…", "");
-    window._prosolSincronizarCatalogoSupabase().then(() => pintarEquipos());
-  }
+  autoActualizarCatalogo();
 }
 
 function filaDato(k, v) {
@@ -459,7 +476,8 @@ function capturarUbicacion() {
 
 // ---------- Escáner QR de equipos ----------
 let qrStream = null, qrLoop = null;
-async function abrirEscanerQR() {
+async function abrirEscanerQR(cb) {
+  estado._pickCb = typeof cb === "function" ? cb : setEquipoOT;
   $("#sheet-qr").hidden = false;
   $("#qr-manual").value = "";
   const estadoTxt = $("#qr-estado");
@@ -500,7 +518,7 @@ function usarSerieEscaneada(valor) {
   if (m) serie = m[1];
   const eq = (estado.catalogo?.equipos || []).find(e => (e.SERIE || "") === serie);
   if (eq) {
-    setEquipoOT(eq);
+    (estado._pickCb || setEquipoOT)(eq);
     toast("Equipo encontrado: serie " + serie, "ok");
   } else {
     toast("No hay un equipo con la serie " + serie + " en el catálogo.", "err");
@@ -536,7 +554,8 @@ function pintarProgramaciones() {
       </span>`;
     li.onclick = () => {
       const eq = (estado.catalogo.equipos || []).find(e => e.SERIE === p.SERIE);
-      nuevaOT(eq || { SERIE: p.SERIE, ID_CLIENTE: p.ID_CLIENTE }, p.TIPO_MANTENIMIENTO);
+      marcarVisto(p.ID_VISITA || p.ID_SB);
+      nuevaOT(eq || { SERIE: p.SERIE, ID_CLIENTE: p.ID_CLIENTE }, p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: p });
     };
     cont.appendChild(li);
   });
@@ -544,10 +563,11 @@ function pintarProgramaciones() {
 }
 
 // ---------- Nueva / editar OT ----------
-function nuevaOT(equipo, tipo) {
+function nuevaOT(equipo, tipo, ctx) {
+  estado._otCtx = ctx || { clase: "NO_PROGRAMADA" };
   estado.edit = { COD_TEMP: "" };
   estado.fotos = []; estado.actividades = [];
-  $("#ot-titulo").textContent = "Nueva orden";
+  $("#ot-titulo").textContent = { URGENTE: "🚨 Orden urgente", NO_PROGRAMADA: "Orden no programada" }[estado._otCtx.clase] || "Orden programada";
   $("#ot-numero").value = "";
   $("#ot-fecha").value = hoyISO();
   $("#ot-horas").value = "";
@@ -702,6 +722,8 @@ function guardarOT() {
     FECHA: $("#ot-fecha").value || hoyISO(),
     TIPO_OT: $("#ot-tipo").value || "PREVENTIVO",
     ESTADO: "REALIZADO",
+    CLASE_VISITA: (estado._otCtx || {}).clase || "NO_PROGRAMADA",
+    SOLICITUD_ID: ((estado._otCtx || {}).sol || {}).id || null,
     TRABAJO_REALIZADO: $("#ot-obs").value.trim(),
     OBSERVACIONES: $("#ot-obs").value.trim(),
     HORAS_MAQUINA: $("#ot-horas").value ? Number($("#ot-horas").value) : null,
@@ -732,8 +754,15 @@ function guardarOT() {
   copia._confirmada = false;
   estado.historial.unshift(copia);
 
-  // Baja automática de visita programada para este equipo/serie
-  _bajarVisitaProgramada(orden.SERIE, orden.ID_CLIENTE);
+  // M9-B: solo se cierra la visita que realmente se atendió (antes cerraba la primera de esa serie)
+  const ctx = estado._otCtx || {};
+  if (ctx.visita) _bajarVisitaProgramada(ctx.visita);
+  if (ctx.sol) {
+    ctx.sol.atendida = true; ctx.sol.numero_ot = numero;
+    ctx.sol._patch = Object.assign(ctx.sol._patch || {}, { atendida: true, numero_ot: numero });
+    syncSolicitudes(true);
+  }
+  estado._otCtx = null;
 
   guardarLocal(); refrescarSync();
   toast("Orden guardada. Queda lista para enviar.", "ok");
@@ -741,42 +770,21 @@ function guardarOT() {
 }
 
 // Marca como EJECUTADA la visita programada del equipo en Supabase y la retira del catálogo local
-async function _bajarVisitaProgramada(serie, idCliente) {
-  if (!serie) return;
-  const progs = estado.catalogo?.programaciones || [];
-  // Buscar visita pendiente que coincida con la serie del equipo
-  const visita = progs.find(p =>
-    p.SERIE === serie &&
-    (p.ESTADO || '').toUpperCase() === 'PROGRAMADA'
-  );
+async function _bajarVisitaProgramada(visita) {
   if (!visita) return;
-  // Retirar del catálogo local inmediatamente (sin esperar respuesta de red)
-  estado.catalogo.programaciones = progs.filter(p => p !== visita);
-  // Actualizar badge
-  const badge = document.getElementById('badge-prog-venc');
-  if (badge) {
-    const hoy = new Date().toISOString().slice(0, 10);
-    const venc = (estado.catalogo.programaciones || []).filter(
-      p => p.FECHA_PROGRAMADA && p.FECHA_PROGRAMADA < hoy
-    ).length;
-    badge.textContent = venc;
-  }
+  const progs = estado.catalogo?.programaciones || [];
+  // Retirar SOLO esa visita del catálogo local (sin esperar respuesta de red)
+  estado.catalogo.programaciones = progs.filter(p => p !== visita && (p.ID_VISITA || p.ID_SB) !== (visita.ID_VISITA || visita.ID_SB));
   await guardarLocal();
-  // Marcar como EJECUTADA en Supabase si hay conexión
   if (typeof API === 'undefined' || !API.hayNube()) return;
   try {
     const idSb = visita.ID_SB || visita.ID_VISITA;
     if (!idSb) return;
-    // Intentar por id_escritorio primero, luego por id uuid
-    await API.update('visitas_programadas', idSb, { estado: 'EJECUTADA' })
-      .catch(() => null);
+    await API.update('visitas_programadas', idSb, { estado: 'EJECUTADA' }).catch(() => null);
     toastG('✅ Visita programada marcada como realizada', 'ok');
-  } catch(e) {
-    // No crítico: la baja local ya está hecha
-  }
+  } catch (e) { /* no crítico: la baja local ya está hecha */ }
 }
 
-// ---------- Historial permanente "Mis órdenes" ----------
 function histFiltrado(q) {
   q = (q || "").trim().toLowerCase();
   if (!q) return estado.historial;
@@ -1106,7 +1114,8 @@ async function compartirEnvio(envio) {
 }
 
 // ---------- Hoja: elegir equipo ----------
-function abrirSheetEquipo() {
+function abrirSheetEquipo(cb) {
+  estado._pickCb = typeof cb === "function" ? cb : setEquipoOT;
   if (!estado.catalogo) { toast("Primero carga el catálogo de oficina.", "err"); return; }
   $("#sheet-buscar").value = ""; pintarSheet(""); $("#sheet-equipo").hidden = false;
   setTimeout(() => $("#sheet-buscar").focus(), 50);
@@ -1120,8 +1129,282 @@ function pintarSheet(q) {
         <div class="row-title">Serie ${e.SERIE || "—"}</div>
         <div class="row-sub">${[e.MARCA, e.MODELO].filter(Boolean).join(" ")} · ${cli?.RAZON_SOCIAL || "—"}</div>
       </div><span class="row-chev">›</span>`;
-    li.onclick = () => { setEquipoOT(e); $("#sheet-equipo").hidden = true; };
+    li.onclick = () => { (estado._pickCb || setEquipoOT)(e); $("#sheet-equipo").hidden = true; };
     ul.appendChild(li);
+  });
+}
+
+// ══════════ M9-B: Hoy, visitas no programadas / urgentes y autorización ══════════
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const esSup = () => /SUPERVISOR/i.test(((estado.catalogo?.tecnicos || []).find(t => nombreTecnico(t) === estado.tecnico) || {}).ESPECIALIDAD || "");
+function esSupervisor() { return esSup(); }
+function supervisores() { return (estado.catalogo?.tecnicos || []).filter(t => /SUPERVISOR/i.test(t.ESPECIALIDAD || "")); }
+function equipoPorSerie(serie) { return (estado.catalogo?.equipos || []).find(e => e.SERIE === serie) || null; }
+function numWA(tel) {
+  let d = String(tel || "").replace(/\D/g, "");
+  if (d.startsWith("593")) return d;
+  if (d.startsWith("0")) d = d.slice(1);
+  return d.length >= 8 ? "593" + d : "";
+}
+const CLASE_TXT = { PROGRAMADA: "Programada", NO_PROGRAMADA: "No programada", URGENTE: "Urgente" };
+
+// ---- "NUEVA" y descartes, por técnico, en el teléfono ----
+function kVistos() { return "prosol_hoy_vistos::" + (estado.tecnico || ""); }
+function leerVistos() { try { return JSON.parse(localStorage.getItem(kVistos()) || "{}"); } catch (x) { return {}; } }
+function guardarVistos(v) { try { localStorage.setItem(kVistos(), JSON.stringify(v)); } catch (x) { /* sin almacenamiento */ } }
+function marcarVisto(id) { const v = leerVistos(); v.ids = v.ids || {}; v.ids[id] = 1; guardarVistos(v); }
+function esNueva(id) { const v = leerVistos(); return !(v.ids && v.ids[id]); }
+function baselineVistos() {            // la primera vez, lo que ya existe no cuenta como "nuevo"
+  const v = leerVistos(); if (v.base) return;
+  v.base = true; v.ids = v.ids || {};
+  (estado.catalogo?.programaciones || []).forEach(p => { v.ids[p.ID_VISITA || p.ID_SB] = 1; });
+  (estado.solicitudes || []).forEach(s => { v.ids[s.id] = 1; });
+  guardarVistos(v);
+}
+
+// ---- Agenda: arma los grupos de la pantalla Hoy ----
+function datosTarjeta(serie, idCliente, nombreCli) {
+  const e = equipoPorSerie(serie), cli = clientePorId(e ? e.ID_CLIENTE : idCliente);
+  return { e, equipo: e ? tituloEquipo(e) : "Equipo " + serie, cliente: cli?.RAZON_SOCIAL || nombreCli || "—" };
+}
+function agendaHoy() {
+  const hoy = hoyISO(), yo = estado.tecnico, sup = esSup();
+  const a = { porAutorizar: [], urgentes: [], pendientes: [], rechazadas: [], hoy: [], vencidas: [], proximas: [] };
+  const v = leerVistos();
+  (estado.catalogo?.programaciones || []).filter(p => (p.ESTADO || "PROGRAMADA").toUpperCase() === "PROGRAMADA").forEach(p => {
+    const f = p.FECHA_PROGRAMADA || "";
+    const it = Object.assign({ k: "PROG", id: p.ID_VISITA || p.ID_SB, p, fecha: f, serie: p.SERIE, tipoMant: p.TIPO_MANTENIMIENTO || "Mantenimiento", clase: "PROGRAMADA" },
+      datosTarjeta(p.SERIE, p.ID_CLIENTE));
+    (!f || f === hoy ? a.hoy : f < hoy ? a.vencidas : a.proximas).push(it);
+  });
+  (estado.solicitudes || []).forEach(s => {
+    const mia = s.solicitante === yo;
+    const it = Object.assign({ k: "SOL", id: s.id, s, fecha: s.fecha_prevista || "", serie: s.serie, tipoMant: s.tipo_mantenimiento || "Mantenimiento", clase: s.clase },
+      datosTarjeta(s.serie, s.id_cliente, s.cliente_nombre));
+    if (s.estado === "SOLICITADA") {
+      if (sup) a.porAutorizar.push(it);
+      else if (mia) (s.clase === "URGENTE" && !s.atendida ? a.urgentes : a.pendientes).push(it);
+    } else if (s.estado === "AUTORIZADA" && !s.atendida) {
+      const f = it.fecha;
+      if (s.clase === "URGENTE") a.urgentes.push(it);
+      else (!f || f <= hoy ? a.hoy : a.proximas).push(it);
+    } else if (s.estado === "RECHAZADA" && mia && !(v.rech && v.rech[s.id])) a.rechazadas.push(it);
+  });
+  const orden = (x, y) => (x.fecha || "").localeCompare(y.fecha || "");
+  ["hoy", "vencidas", "proximas"].forEach(g => a[g].sort(orden));
+  return a;
+}
+function badgesTarjeta(it, yo) {
+  const b = [];
+  if (it.clase === "URGENTE") b.push('<span class="hb urg">URGENTE</span>');
+  else if (it.clase === "NO_PROGRAMADA") b.push('<span class="hb np">NO PROGRAMADA</span>');
+  const s = it.s;
+  if (s && s.estado === "SOLICITADA" && it.clase === "URGENTE") b.push('<span class="hb pen">Autorización posterior</span>');
+  if (s && s.estado === "AUTORIZADA") b.push('<span class="hb ok">Autorizada' + (s.autorizado_por ? " · " + ESC(s.autorizado_por) : "") + "</span>");
+  if (s && s.estado === "RECHAZADA") b.push('<span class="hb rech">Rechazada</span>');
+  if (esNueva(it.id) && !(s && s.solicitante === yo)) b.push('<span class="hb nuev">NUEVA</span>');
+  return b.join("");
+}
+function tarjetaHoy(it, modo) {
+  const yo = estado.tecnico, s = it.s;
+  const acc = [];
+  if (modo === "aut") acc.push('<button class="btn btn-primary" data-acc="autorizar">✔ Autorizar</button>', '<button class="btn btn-ghost" data-acc="rechazar">✕ Rechazar</button>');
+  else if (modo === "rech") acc.push('<button class="btn btn-ghost" data-acc="entendido">Entendido</button>');
+  else if (modo !== "pen") acc.push('<button class="btn btn-primary" data-acc="atender">Atender</button>');
+  const fecha = it.fecha ? fmtFecha(it.fecha) : "Sin fecha";
+  return `<div class="hcard ${modo}" data-k="${it.k}" data-id="${ESC(it.id)}">
+    <div class="hc-top"><span class="hc-fecha">${ESC(fecha)}</span>${badgesTarjeta(it, yo)}</div>
+    <div class="hc-main">${ESC(it.cliente)}</div>
+    <div class="hc-sub">Serie ${ESC(it.serie)} · ${ESC(it.equipo)}</div>
+    <div class="hc-sub">${ESC(it.tipoMant)}</div>
+    ${s && s.motivo ? `<div class="hc-motivo">“${ESC(s.motivo)}”</div>` : ""}
+    ${s && modo === "aut" ? `<div class="hc-sub">Pide: ${ESC(s.solicitante)}</div>` : ""}
+    ${s && modo === "pen" ? `<div class="hc-sub">Esperando que el supervisor autorice…</div>` : ""}
+    ${acc.length ? `<div class="hc-acc">${acc.join("")}</div>` : ""}
+  </div>`;
+}
+function pintarHoy() {
+  const cont = $("#hoy-contenido"); if (!cont) return;
+  $("#hoy-fecha").textContent = fmtFecha(hoyISO());
+  $("#fab-visita").hidden = !estado.catalogo;
+  if (!estado.catalogo) {
+    cont.innerHTML = `<p class="hint">Carga el catálogo en la pestaña <b>Oficina</b> para ver tu agenda.</p>`; return;
+  }
+  baselineVistos();
+  const a = agendaHoy();
+  const sec = (titulo, arr, modo, cls) => arr.length
+    ? `<h2 class="hoy-h ${cls}">${titulo} <span>${arr.length}</span></h2>` + arr.map(i => tarjetaHoy(i, modo)).join("") : "";
+  let h = "";
+  h += sec("Por autorizar", a.porAutorizar, "aut", "aut");
+  h += sec("🚨 Urgentes", a.urgentes, "urg", "urg");
+  h += sec("Esperando autorización", a.pendientes, "pen", "");
+  h += sec("Rechazadas", a.rechazadas, "rech", "");
+  h += sec("Para hoy", a.hoy, "hoy", "");
+  h += sec("Vencidas", a.vencidas, "venc", "venc");
+  if (a.proximas.length) h += `<details class="hoy-prox"><summary>Próximas <span>${a.proximas.length}</span></summary>${a.proximas.map(i => tarjetaHoy(i, "prox")).join("")}</details>`;
+  if (!h) h = `<p class="hint">No tienes visitas pendientes. Si surge algo, usa el botón ＋.</p>`;
+  cont.innerHTML = h;
+  autoActualizarCatalogo();
+  refrescarSync();
+}
+async function accionHoy(ev) {
+  const btn = ev.target.closest("[data-acc]"); if (!btn) return;
+  const card = btn.closest(".hcard"); if (!card) return;
+  const acc = btn.dataset.acc, k = card.dataset.k, id = card.dataset.id;
+  if (k === "PROG") {
+    const p = (estado.catalogo?.programaciones || []).find(x => String(x.ID_VISITA || x.ID_SB) === id); if (!p) return;
+    marcarVisto(id);
+    const d = datosTarjeta(p.SERIE, p.ID_CLIENTE);
+    nuevaOT(d.e || { SERIE: p.SERIE, ID_CLIENTE: p.ID_CLIENTE }, p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: p });
+    return;
+  }
+  const s = (estado.solicitudes || []).find(x => String(x.id) === id); if (!s) return;
+  if (acc === "autorizar" || acc === "rechazar") { await resolverSolicitud(s, acc === "autorizar" ? "AUTORIZADA" : "RECHAZADA"); return; }
+  if (acc === "entendido") { const v = leerVistos(); v.rech = v.rech || {}; v.rech[s.id] = 1; guardarVistos(v); pintarHoy(); return; }
+  if (acc === "atender") {
+    marcarVisto(s.id);
+    const d = datosTarjeta(s.serie, s.id_cliente, s.cliente_nombre);
+    nuevaOT(d.e || { SERIE: s.serie, ID_CLIENTE: s.id_cliente }, s.tipo_mantenimiento, { clase: s.clase, sol: s });
+  }
+}
+
+// ---- Solicitudes: subir pendientes y bajar las de la nube ----
+let _solBusy = false, _solTs = 0, _solRepetir = false;
+async function syncSolicitudes(forzar) {
+  if (typeof API === "undefined" || !API.hayNube() || !navigator.onLine) return;
+  if (_solBusy) { if (forzar) _solRepetir = true; return; }   // un cambio llegó en pleno envío: se repite al terminar
+  if (!forzar && Date.now() - _solTs < 15000) return;
+  _solBusy = true;
+  try {
+    for (const s of estado.solicitudes) {
+      try {
+        if (s._nuevo) {
+          const fila = { serie: s.serie, id_equipo: UUID_RE.test(s.id_equipo || "") ? s.id_equipo : null,
+            id_cliente: UUID_RE.test(s.id_cliente || "") ? s.id_cliente : null, cliente_nombre: s.cliente_nombre || "",
+            clase: s.clase, tipo_mantenimiento: s.tipo_mantenimiento || "", motivo: s.motivo || "", fecha_prevista: s.fecha_prevista || null,
+            solicitante: s.solicitante || "", estado: s.estado, autorizado_por: s.autorizado_por || null,
+            fecha_resolucion: s.fecha_resolucion || null, atendida: !!s.atendida, numero_ot: s.numero_ot || null };
+          const r = await API.insert("solicitudes_ot", fila);
+          if (r && r.id) {
+            s.id = r.id; delete s._nuevo;
+            // lo que cambió mientras se enviaba (p. ej. "atendida") se manda como corrección
+            const dif = {};
+            ["estado", "autorizado_por", "fecha_resolucion", "numero_ot"].forEach(k => { if ((s[k] ?? null) !== (fila[k] ?? null)) dif[k] = s[k] ?? null; });
+            if (!!s.atendida !== !!fila.atendida) dif.atendida = !!s.atendida;
+            if (Object.keys(dif).length) s._patch = Object.assign(s._patch || {}, dif); else delete s._patch;
+          }
+        } else if (s._patch && UUID_RE.test(String(s.id))) {
+          await API.update("solicitudes_ot", s.id, s._patch); delete s._patch;
+        }
+      } catch (x) { /* queda pendiente para el próximo intento */ }
+    }
+    const desde = new Date(Date.now() - 30 * 86400000).toISOString();
+    const filas = await API.select("solicitudes_ot", { creado: "gte." + desde });
+    if (Array.isArray(filas)) {
+      const locales = new Map(estado.solicitudes.map(s => [String(s.id), s]));
+      const res = [];
+      filas.forEach(r => {
+        const l = locales.get(String(r.id));
+        if (l) {                      // se actualiza el MISMO objeto (la orden en curso lo referencia)
+          const pend = l._patch;
+          Object.assign(l, r);
+          if (pend) { Object.assign(l, pend); l._patch = pend; }
+          res.push(l); locales.delete(String(r.id));
+        } else res.push(r);
+      });
+      locales.forEach(l => { if (l._nuevo || l._patch) res.push(l); });   // pendientes aún sin subir
+      res.sort((x, y) => String(y.creado || "").localeCompare(String(x.creado || "")));
+      estado.solicitudes = res;
+    }
+    _solTs = Date.now();
+    await guardarLocal();
+  } catch (x) { /* sin red: se usa lo guardado */ }
+  finally { _solBusy = false; }
+  if (_solRepetir) { _solRepetir = false; return syncSolicitudes(true); }
+  if ($('[data-screen="hoy"]')?.classList.contains("active")) pintarHoy(); else refrescarSync();
+}
+window._prosolSyncSolicitudes = syncSolicitudes;
+async function resolverSolicitud(s, nuevo) {
+  const ahora = new Date().toISOString();
+  s.estado = nuevo; s.autorizado_por = estado.tecnico; s.fecha_resolucion = ahora;
+  s._patch = Object.assign(s._patch || {}, { estado: nuevo, autorizado_por: estado.tecnico, fecha_resolucion: ahora });
+  await guardarLocal(); pintarHoy();
+  toast(nuevo === "AUTORIZADA" ? "Visita autorizada." : "Solicitud rechazada.", "ok");
+  await syncSolicitudes(true);
+}
+
+// ---- Pantalla "Nueva visita" (no programada / urgente) ----
+function setEquipoNV(e) {
+  estado._nvEquipo = e;
+  $("#nv-serie").value = e.SERIE || "";
+  const cli = clientePorId(e.ID_CLIENTE);
+  $("#nv-cliente").textContent = [cli ? "Cliente: " + cli.RAZON_SOCIAL : "", tituloEquipo(e)].filter(Boolean).join(" · ");
+  const progs = (estado.catalogo?.programaciones || []).filter(p => p.SERIE === e.SERIE && (p.ESTADO || "PROGRAMADA").toUpperCase() === "PROGRAMADA");
+  $("#nv-progs").hidden = !progs.length;
+  const cont = $("#nv-progs-lista"); cont.innerHTML = "";
+  progs.forEach(p => {
+    const b = document.createElement("button"); b.className = "btn btn-ghost btn-block"; b.style.marginTop = "8px";
+    b.textContent = "Atender la del " + fmtFecha(p.FECHA_PROGRAMADA) + " · " + (p.TIPO_MANTENIMIENTO || "Mantenimiento");
+    b.onclick = () => { marcarVisto(p.ID_VISITA || p.ID_SB); nuevaOT(e, p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: p }); };
+    cont.appendChild(b);
+  });
+  actualizarBotonNV();
+}
+function claseNV() { const r = document.querySelector('input[name="nv-clase"]:checked'); return r ? r.value : "NO_PROGRAMADA"; }
+function actualizarBotonNV() {
+  const c = claseNV(), b = $("#btn-nv-crear"); if (!b) return;
+  b.textContent = esSup() ? "Crear y atender" : c === "URGENTE" ? "🚨 Atender ya" : "Solicitar autorización";
+}
+function abrirNuevaVisita(equipo) {
+  if (!estado.catalogo) { toast("Primero carga el catálogo de oficina.", "err"); return; }
+  estado._nvEquipo = null; $("#nv-serie").value = ""; $("#nv-cliente").textContent = ""; $("#nv-motivo").value = "";
+  $("#nv-progs").hidden = true;
+  document.querySelector('input[name="nv-clase"][value="NO_PROGRAMADA"]').checked = true;
+  const sel = $("#nv-tipo"); sel.innerHTML = "";
+  (estado.catalogo.tipos_mantenimiento || ["MANTENIMIENTO GENERAL"]).forEach(t => {
+    const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o);
+  });
+  if (equipo && equipo.SERIE) setEquipoNV(equipo); else actualizarBotonNV();
+  ir("nueva-visita");
+}
+function avisarSupervisor(s) {
+  const eq = equipoPorSerie(s.serie);
+  const L = ["*PROSOL Campo · Visita " + (s.clase === "URGENTE" ? "URGENTE 🚨" : "NO PROGRAMADA") + " por autorizar*",
+    "Técnico: " + s.solicitante, "Cliente: " + (s.cliente_nombre || "—"),
+    "Equipo: serie " + s.serie + (eq ? " · " + tituloEquipo(eq) : ""),
+    "Tipo: " + (s.tipo_mantenimiento || "—"), "Motivo: " + s.motivo];
+  if (s.clase === "URGENTE") L.push("", "⚠ Emergencia: el técnico ya está atendiendo; requiere autorización posterior.");
+  L.push("", "Autoriza en PROSOL Campo → Hoy → Por autorizar.");
+  const sup = supervisores().map(t => numWA(t.TELEFONO)).find(Boolean) || "";
+  try { window.open("https://wa.me/" + sup + "?text=" + encodeURIComponent(L.join("\n")), "_blank"); } catch (x) { /* popup bloqueado */ }
+}
+function crearVisitaNV() {
+  const e = estado._nvEquipo;
+  if (!e || !e.SERIE) { toast("Elige el equipo primero.", "err"); return; }
+  const motivo = $("#nv-motivo").value.trim();
+  if (motivo.length < 3) { toast("Escribe el motivo de la visita.", "err"); return; }
+  const clase = claseNV(), tipo = $("#nv-tipo").value || "MANTENIMIENTO GENERAL", sup = esSup();
+  const cli = clientePorId(e.ID_CLIENTE), ahora = new Date().toISOString();
+  const s = { id: "L-" + uid(8), _nuevo: true, serie: e.SERIE, id_equipo: e.ID_SB || null,
+    id_cliente: cli?.ID_SB || e.ID_CLIENTE || null, cliente_nombre: cli?.RAZON_SOCIAL || "", clase, tipo_mantenimiento: tipo,
+    motivo, fecha_prevista: hoyISO(), solicitante: estado.tecnico, estado: sup ? "AUTORIZADA" : "SOLICITADA",
+    autorizado_por: sup ? estado.tecnico : null, fecha_resolucion: sup ? ahora : null, atendida: false, creado: ahora };
+  estado.solicitudes.unshift(s);
+  if (!sup) avisarSupervisor(s);                 // dentro del toque del usuario (el navegador exige eso)
+  guardarLocal(); syncSolicitudes(true);
+  if (clase === "URGENTE" || sup) { nuevaOT(e, tipo, { clase, sol: s }); return; }
+  toast("Solicitud enviada al supervisor.", "ok"); ir("hoy");
+}
+
+// Catálogo anterior a M9-B (sin roles ni vínculo de clientes): se baja de nuevo una vez.
+function autoActualizarCatalogo() {
+  if (!estado.catalogo || (estado.catalogo.rev || 0) >= 3 || !navigator.onLine || autoActualizarCatalogo._ya
+      || !window._prosolSincronizarCatalogoSupabase || typeof API === "undefined" || !API.hayNube()) return;
+  autoActualizarCatalogo._ya = true;
+  toast("Actualizando catálogo…", "");
+  window._prosolSincronizarCatalogoSupabase().then(() => {
+    const act = document.querySelector(".screen.active"); const n = act && act.dataset.screen;
+    if (n === "equipos") pintarEquipos(); else if (n === "hoy") pintarHoy();
   });
 }
 
@@ -1175,16 +1458,19 @@ function wire() {
   if ($("#btn-orden-reenviar")) $("#btn-orden-reenviar").onclick = reenviarOrdenIndividual;
   if ($("#btn-orden-whatsapp")) $("#btn-orden-whatsapp").onclick = enviarOrdenWhatsApp;
   if ($("#btn-orden-confirmar")) $("#btn-orden-confirmar").onclick = toggleConfirmada;
-  $("#btn-ot-desde-eq").onclick = () => nuevaOT(estado._equipoActual);
+  $("#btn-ot-desde-eq").onclick = () => abrirNuevaVisita(estado._equipoActual);
   if ($("#sheet-eq-edit-close")) $("#sheet-eq-edit-close").onclick = () => $("#sheet-eq-edit").hidden = true;
   if ($("#eqe-guardar")) $("#eqe-guardar").onclick = guardarDatosEquipo;
-  $("#btn-nueva-ot").onclick = () => {
-    if (!estado.catalogo) { toast("Primero carga el catálogo de oficina.", "err"); return; }
-    nuevaOT(null);
-  };
+  if ($("#fab-visita")) $("#fab-visita").onclick = () => abrirNuevaVisita(null);
+  if ($("#hoy-contenido")) $("#hoy-contenido").addEventListener("click", accionHoy);
+  if ($("#btn-nv-elegir")) $("#btn-nv-elegir").onclick = () => abrirSheetEquipo(setEquipoNV);
+  if ($("#btn-nv-qr")) $("#btn-nv-qr").onclick = () => abrirEscanerQR(setEquipoNV);
+  if ($("#btn-nv-crear")) $("#btn-nv-crear").onclick = crearVisitaNV;
+  $$('input[name="nv-clase"]').forEach(r => r.addEventListener("change", actualizarBotonNV));
+  window.addEventListener("online", () => syncSolicitudes(true));
   if ($("#btn-ubicacion")) $("#btn-ubicacion").onclick = capturarUbicacion;
-  $("#btn-elegir-equipo").onclick = abrirSheetEquipo;
-  if ($("#btn-qr-equipo")) $("#btn-qr-equipo").onclick = abrirEscanerQR;
+  $("#btn-elegir-equipo").onclick = () => abrirSheetEquipo(setEquipoOT);
+  if ($("#btn-qr-equipo")) $("#btn-qr-equipo").onclick = () => abrirEscanerQR(setEquipoOT);
   if ($("#sheet-qr-close")) $("#sheet-qr-close").onclick = cerrarEscanerQR;
   if ($("#qr-manual-btn")) $("#qr-manual-btn").onclick = () => {
     const v = $("#qr-manual").value.trim();
@@ -1493,7 +1779,8 @@ function initSupabase() {
 
       // 3. Técnicos
       _e.catalogo.tecnicos = tec.map(t => ({
-        ID_TECNICO: t.id_escritorio || t.id,
+        ID_TECNICO: t.id_escritorio || t.id, ID_SB: t.id,
+        ESPECIALIDAD: t.especialidad || '', TELEFONO: t.telefono || '',
         NOMBRES: t.nombres || '', APELLIDOS: t.apellidos || '',
         NOMBRE_COMPLETO: ((t.nombres||'') + ' ' + (t.apellidos||'')).trim()
       }));
@@ -1559,13 +1846,14 @@ function initSupabase() {
       }));
 
       _e.catalogo.generado = new Date().toISOString().slice(0, 10);
-      _e.catalogo.rev = 2;   // M9-A: clientes vinculados por UUID y por código
+      _e.catalogo.rev = 3;   // M9-A/B: clientes por UUID y código; técnicos con rol y teléfono
       _e.catalogo.resumen = {
         equipos: eq.length, clientes: cli.length,
         tecnicos: tec.length, programaciones: prog.length,
         actividades: acts.length, historial_ot: ots.length
       };
       await (window._prosolGuardarLocal || (async()=>{}))();
+      if (window._prosolSyncSolicitudes) { try { await window._prosolSyncSolicitudes(true); } catch (x) {} }
       (window._prosolPintarLogin || (()=>{}))(); (window._prosolRefrescarSync || (()=>{}))();
       toastG('✅ Catálogo sincronizado: ' + eq.length + ' equipos · ' +
              acts.length + ' actividades · ' + ots.length + ' OT historial', 'ok');

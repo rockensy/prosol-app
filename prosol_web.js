@@ -225,6 +225,7 @@ function arrancarApp(sesion) {
     ...(esAdmin ? [['liquidacion','💰 Liquidación']] : []),
     ['ordenes',      '📋 Órdenes OT'],
     ['programacion', '📅 Programación'],
+    ['solicitudes',  '🚨 Solicitudes de visita'],
     ['inventario',   '📦 Inventario'],
     ['reportes',     '📄 Reportes'],
     ['whatsapp',     '💬 WhatsApp'],
@@ -365,6 +366,78 @@ VIEWS.programacion = async () => {
   const inpQ=$id('q'), selE=$id('filtEst');
   if(inpQ) inpQ.addEventListener('input',pintar);
   if(selE) selE.addEventListener('change',pintar);
+  pintar();
+};
+
+/* ── Solicitudes de visita no programada / urgente (M9-B) ─────────────── */
+VIEWS.solicitudes = async () => {
+  if (!API.hayNube()) {
+    $id('main').innerHTML = '<div class="card"><h2>🚨 Solicitudes de visita</h2><p>☁ Sin conexión a Supabase. Ve a <b>Configuración</b>.</p></div>';
+    return;
+  }
+  const quien = () => { const s = window._prosolSesion || {}; return s.nombre || s.usuario || 'OFICINA'; };
+  $id('main').innerHTML = `<div class="card"><h2>🚨 Solicitudes de visita no programada / urgente</h2>
+    <div class="toolbar">
+      <select id="solEst" class="inp-web" style="max-width:200px">
+        <option value="">Todos los estados</option><option>SOLICITADA</option><option>AUTORIZADA</option><option>RECHAZADA</option>
+      </select>
+      <button class="btn-web prim" id="solNueva">＋ Nueva visita autorizada</button>
+    </div>
+    <div id="solForm"></div><div id="solLista">Cargando…</div></div>`;
+  const [sol, eq, cli, acts] = await Promise.all([
+    API.select('solicitudes_ot').catch(()=>[]), API.select('equipos').catch(()=>[]),
+    API.select('clientes').catch(()=>[]), API.select('actividades').catch(()=>[])]);
+  const cliMap = {}; cli.forEach(c => cliMap[c.id] = c);
+  let filas = sol.slice().sort((a,b) => String(b.creado||'').localeCompare(String(a.creado||'')));
+  function pintar() {
+    const est = $id('solEst').value;
+    const f = filas.filter(r => !est || r.estado === est).map(r => {
+      const col = r.estado === 'SOLICITADA' ? '#E67E22' : r.estado === 'AUTORIZADA' ? '#27AE60' : '#E74C3C';
+      const acc = r.estado === 'SOLICITADA'
+        ? `<button class="btn-web mini prim" data-a="${r.id}" data-r="AUTORIZADA">Autorizar</button> <button class="btn-web mini" data-a="${r.id}" data-r="RECHAZADA">Rechazar</button>` : '';
+      return [ESC(String(r.creado||'').slice(0,16).replace('T',' ')),
+        `<b style="color:${r.clase==='URGENTE'?'#E74C3C':'#2471A3'}">${r.clase==='URGENTE'?'URGENTE':'NO PROGRAMADA'}</b>`,
+        ESC(r.serie), ESC(r.cliente_nombre||(cliMap[r.id_cliente]||{}).razon_social||'—'), ESC(r.tipo_mantenimiento||'—'),
+        ESC(r.motivo||''), ESC(r.solicitante||''),
+        `<span style="color:${col};font-weight:700">${ESC(r.estado)}</span>${r.autorizado_por?'<br><small>'+ESC(r.autorizado_por)+'</small>':''}${r.atendida?'<br><small>✔ atendida'+(r.numero_ot?' · OT '+ESC(r.numero_ot):'')+'</small>':''}`, acc];
+    });
+    const l = $id('solLista'); if (!l) return;
+    l.innerHTML = tabla(['Creada','Clase','Serie','Cliente','Tipo','Motivo','Pide','Estado',''], f);
+    l.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', async () => {
+      const r = filas.find(x => String(x.id) === b.dataset.a); if (!r) return;
+      const cambios = { estado: b.dataset.r, autorizado_por: quien(), fecha_resolucion: new Date().toISOString() };
+      try { await API.update('solicitudes_ot', r.id, cambios); Object.assign(r, cambios); toast(b.dataset.r === 'AUTORIZADA' ? '✅ Autorizada' : 'Rechazada'); pintar(); }
+      catch (e) { toast('❌ ' + e.message); }
+    }));
+  }
+  $id('solEst').addEventListener('change', pintar);
+  $id('solNueva').addEventListener('click', () => {
+    const opt = eq.slice().sort((a,b)=>String(a.serie).localeCompare(String(b.serie)))
+      .map(e => `<option value="${ESC(e.id)}">${ESC(e.serie)} · ${ESC((cliMap[e.id_cliente]||{}).razon_social||'—')}</option>`).join('');
+    const tipos = acts.map(a => `<option>${ESC(a.descripcion)}</option>`).join('');
+    $id('solForm').innerHTML = `<div class="card" style="background:#F4F8FB"><h3>Nueva visita ya autorizada</h3>
+      <div class="toolbar">
+        <select id="nvEq" class="inp-web" style="max-width:340px">${opt}</select>
+        <select id="nvClase" class="inp-web" style="max-width:170px"><option value="NO_PROGRAMADA">No programada</option><option value="URGENTE">Urgente</option></select>
+        <select id="nvTipo" class="inp-web" style="max-width:260px">${tipos}</select>
+      </div>
+      <input id="nvMotivo" class="inp-web" placeholder="Motivo de la visita" style="width:100%;margin:8px 0">
+      <button class="btn-web prim" id="nvGuardar">Crear y autorizar</button>
+      <button class="btn-web" id="nvCancel">Cancelar</button>
+      <p style="font-size:12px;color:#777">El técnico la verá en su pantalla Hoy como NUEVA, al sincronizar.</p></div>`;
+    $id('nvCancel').addEventListener('click', () => { $id('solForm').innerHTML = ''; });
+    $id('nvGuardar').addEventListener('click', async () => {
+      const e = eq.find(x => String(x.id) === $id('nvEq').value), motivo = $id('nvMotivo').value.trim();
+      if (!e) { toast('Elige el equipo'); return; }
+      if (motivo.length < 3) { toast('Escribe el motivo'); return; }
+      const hoy = new Date(); const f = hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0')+'-'+String(hoy.getDate()).padStart(2,'0');
+      const fila = { serie: e.serie, id_equipo: e.id, id_cliente: e.id_cliente || null, cliente_nombre: (cliMap[e.id_cliente]||{}).razon_social || '',
+        clase: $id('nvClase').value, tipo_mantenimiento: $id('nvTipo').value || '', motivo, fecha_prevista: f,
+        solicitante: 'OFICINA', estado: 'AUTORIZADA', autorizado_por: quien(), fecha_resolucion: new Date().toISOString() };
+      try { const r = await API.insert('solicitudes_ot', fila); filas.unshift(r || fila); $id('solForm').innerHTML = ''; toast('✅ Visita creada y autorizada'); pintar(); }
+      catch (err) { toast('❌ ' + err.message); }
+    });
+  });
   pintar();
 };
 
