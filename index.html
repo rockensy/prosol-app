@@ -132,6 +132,13 @@
         <span class="tile-badge" id="badge-hist" style="background:var(--azul)">0</span></button>
     </div>
 
+    <div class="card" id="envio-estado" hidden>
+      <h2 class="card-h">Envío a Supabase</h2>
+      <p class="card-sub" id="envio-resumen">—</p>
+      <ul class="hint" id="envio-errores" style="margin:6px 0 10px 16px;color:#C0392B"></ul>
+      <button class="btn btn-primary btn-block" id="btn-reintentar-ot" hidden>🔁 Reintentar pendientes</button>
+    </div>
+
     <div class="card card-sync">
       <h2 class="card-h">Catálogo de oficina</h2>
       <p class="card-sub" id="cat-resumen">No has cargado ningún catálogo todavía.</p>
@@ -381,6 +388,7 @@
 <script src="sync.js"></script>
 <script src="prosol_web.js"></script>
 <script src="app.js"></script>
+<script src="envio_estado.js"></script>
 <!-- Hoja modal: escáner QR -->
 <div class="sheet" id="sheet-qr" hidden>
   <div class="sheet-card">

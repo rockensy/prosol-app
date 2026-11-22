@@ -1408,45 +1408,10 @@ function initSupabase() {
   // Subir OT pendientes a Supabase
   const btnSubir = document.getElementById('btn-subir-ot-supabase');
   if (btnSubir) {
-    btnSubir.addEventListener('click', async () => {
-      if (typeof API === 'undefined' || !API.hayNube()) {
-        const panel = document.getElementById('supabase-cfg-movil');
-        if (panel) panel.style.display = 'block';
-        ir('login');
-        toastG('Configura Supabase primero', 'err');
-        return;
-      }
-      const _es = window._prosolEstado;
-      const pendientes = (_es && _es.ordenes) || [];
-      if (!pendientes.length) {
-        toastG('No hay OT pendientes de subir', '');
-        return;
-      }
-      toastG('📤 Subiendo ' + pendientes.length + ' OT a Supabase…', 'ok');
-      let ok = 0, fail = 0;
-      for (const o of pendientes) {
-        try {
-          await API.insert('ordenes', {
-            numero_ot: o.NUMERO_OT || '',
-            fecha: o.FECHA || null,
-            serie: o.SERIE || '',
-            cliente_nombre: o.RAZON_SOCIAL || '',
-            tipo_ot: o.TIPO_OT || 'PREVENTIVO',
-            estado: o.ESTADO || 'REALIZADO',
-            trabajo_realizado: o.TRABAJO_REALIZADO || '',
-            observaciones: '',
-            horas_maquina: o.HORAS_MAQUINA || null,
-            gps_lat: o.GPS_LAT || null,
-            gps_lng: o.GPS_LON || null,
-            gps_link: (o.GPS_LAT && o.GPS_LON)
-              ? 'https://maps.google.com/?q=' + o.GPS_LAT + ',' + o.GPS_LON : null,
-            firma_realiza: (_es && _es.tecnico) || '',
-            origen: 'CAMPO'
-          });
-          ok++;
-        } catch(e) { fail++; }
-      }
-      toastG('✅ Subidas: ' + ok + (fail ? ' · Errores: ' + fail : ''), 'ok');
+    // M7: la subida (estado por OT, sin duplicar, reintento) vive en envio_estado.js
+    btnSubir.addEventListener('click', () => {
+      if (window._prosolSubirPendientes) window._prosolSubirPendientes();
+      else toastG('Todavía cargando, espera un segundo e intenta de nuevo.', 'err');
     });
   }
 }

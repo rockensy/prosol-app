@@ -1,9 +1,10 @@
 /* PROSOL Campo · service worker — cachea la app para uso sin internet. */
-const CACHE = "prosol-campo-v24";
+const CACHE = "prosol-campo-v25";
 const ASSETS = [
   "./index.html",
   "./style.css",
   "./app.js",
+  "./envio_estado.js",
   "./lib/jszip.min.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
