@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#1C2733">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PROSOL Campo">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="style.css">
+<title>PROSOL Campo</title>
+</head>
+<body>
+
+<!-- ═══ APP WEB PC (≥700px) ═══════════════════════════════════════════ -->
+<div id="appView" style="display:none">
+  <header class="topbar">
+    <span class="topbar-brand">⚡ PROSOL</span>
+    <span id="modoBadge" class="badge-modo"></span>
+    <span id="netStatus" class="net-dot online"></span>
+    <nav id="nav" class="nav-pc"></nav>
+    <span style="flex:1"></span>
+    <span id="userBadge" class="topbar-user"></span>
+    <button class="btn-salir" onclick="PROSOL_WEB.logout()">Salir</button>
+  </header>
+  <main id="main" class="main-pc"></main>
+  <footer class="footer-pc">Desarrollado por: ROCKENSY S.A. &amp; MIG / Tec. Master Luis Martinez Ibáñez — Cel: 096 701 5684 | <span id="footerVersion">Versión PROSOL 3.0</span></footer>
+</div>
+
+<!-- ═══ LOGIN SUPABASE (se agrega opción a login existente) ═══════════ -->
+<div id="supabase-cfg-panel" style="display:none;position:fixed;inset:0;background:#000a;z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:16px;padding:28px;width:92%;max-width:420px">
+    <h3 style="margin:0 0 14px;color:#1C2733">⚙ Configurar Supabase</h3>
+    <label style="font-size:12px;font-weight:700;color:#1C2733;display:block;margin-bottom:4px">Project URL</label>
+    <input id="sb-url-inp" style="width:100%;padding:10px;border:1.5px solid #D5DBE1;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:10px" placeholder="https://xxxx.supabase.co">
+    <label style="font-size:12px;font-weight:700;color:#1C2733;display:block;margin-bottom:4px">anon key</label>
+    <input id="sb-key-inp" type="password" style="width:100%;padding:10px;border:1.5px solid #D5DBE1;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:14px" placeholder="eyJhbGci...">
+    <div style="display:flex;gap:8px">
+      <button onclick="PROSOL_WEB.guardarNube()" style="flex:1;padding:10px;background:#F5A623;color:#1C2733;border:none;border-radius:8px;font-weight:700;cursor:pointer">💾 Guardar</button>
+      <button onclick="PROSOL_WEB.probarNube()" style="flex:1;padding:10px;background:#1C2733;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">🔌 Probar</button>
+      <button onclick="document.getElementById('supabase-cfg-panel').style.display='none'" style="padding:10px 16px;background:#eee;border:none;border-radius:8px;cursor:pointer">✕</button>
+    </div>
+    <p id="sb-cfg-msg" style="font-size:12px;color:#27AE60;margin:8px 0 0;text-align:center"></p>
+  </div>
+</div>
+
+<!-- Barra de estado de sincronización (signature, siempre visible) -->
+<header id="syncbar" class="syncbar">
+  <div class="syncbar-left">
+    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span>
+  </div>
+  <div class="syncbar-right">
+    <button id="chip-catalogo" class="chip" data-go="inicio">
+      <span class="chip-dot" id="dot-catalogo"></span>
+      <span id="chip-catalogo-txt">Sin catálogo</span>
+    </button>
+    <button id="chip-pendientes" class="chip chip-amber" data-go="enviar">
+      <span id="chip-pend-num">0</span> por enviar
+    </button>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- PANTALLA: LOGIN -->
+  <section class="screen active" data-screen="login">
+    <div class="login-wrap">
+      <div class="login-mark">PROSOL<span>Campo</span></div>
+      <p class="login-tag">Registro de mantenimientos en sitio</p>
+
+      <!-- Si NO hay catálogo cargado: pedir cargarlo primero -->
+      <div id="login-sin-cat">
+        <p class="hint" style="margin-bottom:14px">Para empezar, actualiza el catálogo de
+          oficina. Trae los técnicos, equipos, historial y programaciones.</p>
+        <button class="btn btn-primary btn-block" id="login-btn-fijo">
+          🔄 Actualizar catálogo de oficina</button>
+        <p class="hint center" style="margin:12px 0">— o si no tienes internet ahora —</p>
+        <label class="btn btn-ghost btn-block">
+          📂 Elegir archivo del catálogo
+          <input id="login-file-catalogo" type="file"
+                 accept=".zip,.prosolcat,application/zip,application/octet-stream,application/x-zip-compressed"
+                 hidden>
+        </label>
+        <p class="hint center" style="margin-top:10px">El botón azul descarga el catálogo más
+          reciente que oficina publicó. Necesitas internet solo para esto.</p>
+        <button onclick="document.getElementById('supabase-cfg-panel').style.display='flex'" 
+                class="btn btn-ghost btn-block" style="margin-top:8px;font-size:13px">
+          ⚙ Configurar conexión Supabase (PC/Web)</button>
+      </div>
+
+      <!-- Si HAY catálogo: elegir técnico de la lista -->
+      <div id="login-con-cat" hidden>
+        <label class="field">
+          <span class="field-label">¿Quién eres?</span>
+          <select id="login-tecnico"></select>
+        </label>
+        <p class="hint">Elige tu nombre de la lista de técnicos registrados en oficina.
+          Tus órdenes se asignarán a ti.</p>
+        <button class="btn btn-primary btn-block" id="btn-entrar">Entrar</button>
+        <p class="hint center" id="login-cat-info" style="margin-top:12px"></p>
+      </div>
+
+      <p class="hint center" id="app-version-login" style="opacity:.6;margin-top:16px">Versión —</p>
+    </div>
+  </section>
+
+  <!-- PANTALLA: INICIO / ESTADO -->
+  <section class="screen" data-screen="inicio">
+    <div class="hero">
+      <p class="hero-eyebrow">Tu jornada · <span id="hero-tecnico"></span></p>
+      <h1 class="hero-num"><span id="hero-pend">0</span><small>órdenes por enviar</small></h1>
+      <div class="hero-meta" id="hero-cat-meta">Carga el catálogo de oficina para empezar.</div>
+      <div class="hero-aviso" id="hero-aviso" hidden></div>
+      <button class="hero-logout" id="btn-logout">Cerrar sesión</button>
+    </div>
+
+    <div class="actions-grid">
+      <button class="tile tile-primary" id="btn-nueva-ot">
+        <span class="tile-ic">＋</span><span class="tile-tx">Nueva orden</span></button>
+      <button class="tile" data-go="programaciones">
+        <span class="tile-ic">📅</span><span class="tile-tx">Programadas</span>
+        <span class="tile-badge" id="badge-prog">0</span></button>
+      <button class="tile" data-go="equipos">
+        <span class="tile-ic">🔧</span><span class="tile-tx">Equipos</span></button>
+      <button class="tile" data-go="enviar">
+        <span class="tile-ic">📤</span><span class="tile-tx">Enviar a oficina</span>
+        <span class="tile-badge" id="badge-pend">0</span></button>
+      <button class="tile" data-go="historial">
+        <span class="tile-ic">🗂️</span><span class="tile-tx">Mis órdenes</span>
+        <span class="tile-badge" id="badge-hist" style="background:var(--azul)">0</span></button>
+    </div>
+
+    <div class="card card-sync">
+      <h2 class="card-h">Catálogo de oficina</h2>
+      <p class="card-sub" id="cat-resumen">No has cargado ningún catálogo todavía.</p>
+      <button class="btn btn-primary btn-block" id="btn-actualizar-cat">
+        🔄 Actualizar catálogo (URL fija)</button>
+      <button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="sincronizarDesdeSupabase()">
+        ☁ Sincronizar desde Supabase</button>
+      <button class="btn btn-ghost btn-block" style="margin-top:8px;background:#1E8449;color:#fff" onclick="subirOTSupabase()">
+        📤 Subir mis OT a Supabase</button>
+      <label class="btn btn-ghost btn-block" style="margin-top:8px">
+        📂 Elegir archivo del catálogo
+        <input id="file-catalogo" type="file"
+               accept=".zip,.prosolcat,application/zip,application/octet-stream,application/x-zip-compressed"
+               hidden>
+      </label>
+      <p class="hint">El botón azul descarga el catálogo más reciente que oficina publicó
+        (necesitas internet). El de archivo sirve si te lo pasaron por WhatsApp.</p>
+      <p class="hint" id="app-version" style="text-align:center;opacity:.6;margin-top:10px">Versión —</p>
+    </div>
+  </section>
+
+  <!-- PANTALLA: EQUIPOS / CLIENTES -->
+  <section class="screen" data-screen="equipos">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Equipos</h1>
+    </div>
+    <div class="searchbar">
+      <input id="buscar-equipo" type="search" placeholder="Filtrar por serie, cliente o modelo">
+    </div>
+    <p class="list-count" id="equipos-count"></p>
+    <div class="tw">
+      <div class="tw-head">
+        <span class="tw-c1">Serie</span><span class="tw-c2">Equipo / Cliente</span>
+      </div>
+      <ul class="tw-body" id="lista-equipos"></ul>
+    </div>
+  </section>
+
+  <!-- PANTALLA: DETALLE DE EQUIPO (historial) -->
+  <section class="screen" data-screen="equipo-detalle">
+    <div class="screen-head">
+      <button class="back" data-go="equipos">‹</button>
+      <h1 id="eq-titulo">Equipo</h1>
+    </div>
+    <div class="card" id="eq-datos"></div>
+    <h2 class="section-h">Historial de mantenimientos</h2>
+    <p class="hint" id="eq-hist-vacio" hidden>Sin trabajos registrados para este equipo.</p>
+    <ul class="timeline" id="eq-historial"></ul>
+    <div class="sticky-foot">
+      <button class="btn btn-primary btn-block" id="btn-ot-desde-eq">Crear orden para este equipo</button>
+    </div>
+  </section>
+
+  <!-- PANTALLA: PROGRAMACIONES -->
+  <section class="screen" data-screen="programaciones">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Mantenimientos programados</h1>
+    </div>
+    <div class="searchbar">
+      <input id="buscar-prog" type="search" placeholder="Filtrar por serie, cliente o fecha">
+    </div>
+    <p class="list-count" id="prog-count"></p>
+    <p class="hint" id="prog-vacio" hidden>Oficina no tiene visitas programadas en este catálogo.</p>
+    <div class="tw">
+      <div class="tw-head">
+        <span class="tw-c1">Fecha</span><span class="tw-c2">Tipo / Cliente</span>
+      </div>
+      <ul class="tw-body" id="lista-prog"></ul>
+    </div>
+  </section>
+
+  <!-- PANTALLA: NUEVA / EDITAR OT -->
+  <section class="screen" data-screen="nueva-ot">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1 id="ot-titulo">Nueva orden</h1>
+    </div>
+
+    <label class="field">
+      <span class="field-label">N° de orden (de tu talonario físico)</span>
+      <input id="ot-numero" type="text" inputmode="numeric" placeholder="Ej. 2150">
+    </label>
+    <p class="hint" style="margin:-8px 0 14px">Escribe el número de la orden física que estás usando.
+      Ese mismo número se registra en oficina.</p>
+
+    <label class="field">
+      <span class="field-label">Equipo (por serie)</span>
+      <input id="ot-serie" type="text" placeholder="Toca para elegir" readonly>
+      <button class="field-btn" id="btn-elegir-equipo">Elegir</button>
+      <button class="field-btn" id="btn-qr-equipo" style="background:var(--azul)">⛶ QR</button>
+    </label>
+    <div class="ot-cliente" id="ot-cliente-info"></div>
+
+    <label class="field">
+      <span class="field-label">Fecha</span>
+      <input id="ot-fecha" type="date">
+    </label>
+
+    <label class="field">
+      <span class="field-label">Tipo de mantenimiento</span>
+      <select id="ot-tipo"></select>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Horas de máquina (lectura)</span>
+      <input id="ot-horas" type="number" inputmode="numeric" placeholder="Ej. 1450">
+    </label>
+
+    <div class="field">
+      <span class="field-label">Ubicación del servicio (opcional)</span>
+      <div class="add-row">
+        <input id="ot-ubicacion" type="text" placeholder="Toca el botón para capturar" readonly>
+        <button class="mini-add" id="btn-ubicacion" style="background:var(--azul)">📍</button>
+      </div>
+      <p class="hint" style="margin:6px 0 0">Registra dónde hiciste el mantenimiento (GPS).</p>
+    </div>
+
+    <div class="field-group">
+      <div class="field-group-head">
+        <span class="field-label">Actividades realizadas</span>
+      </div>
+      <p class="hint" style="margin:0 0 8px">Se cargan según el tipo de mantenimiento. Puedes
+        agregar más abajo.</p>
+      <ul class="chips chips-acts" id="ot-actividades"></ul>
+      <div class="add-row">
+        <input id="ot-act-nueva" type="text" placeholder="Agregar otra actividad">
+        <button class="mini-add" id="btn-add-act">＋</button>
+      </div>
+    </div>
+
+    <label class="field">
+      <span class="field-label">Trabajo realizado / observaciones</span>
+      <textarea id="ot-obs" rows="3" placeholder="Describe lo que hiciste"></textarea>
+    </label>
+
+    <div class="field-group">
+      <span class="field-label">Fotos de evidencia</span>
+      <div class="fotos-grid" id="ot-fotos"></div>
+      <label class="btn btn-ghost btn-block">
+        📷 Tomar o elegir foto
+        <input id="file-foto" type="file" accept="image/*" hidden multiple>
+      </label>
+    </div>
+
+    <div class="field-group">
+      <span class="field-label">Firma del cliente</span>
+      <canvas id="firma" class="firma" width="600" height="220"></canvas>
+      <button class="mini" id="btn-limpiar-firma">Borrar firma</button>
+    </div>
+
+    <div class="sticky-foot two">
+      <button class="btn btn-ghost" id="btn-cancelar-ot">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-ot">Guardar orden</button>
+    </div>
+  </section>
+
+  <!-- PANTALLA: ENVIAR A OFICINA -->
+  <section class="screen" data-screen="enviar">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Enviar a oficina</h1>
+    </div>
+
+    <h2 class="section-h">Órdenes sin empaquetar</h2>
+    <p class="hint" id="enviar-vacio" hidden>No tienes órdenes nuevas pendientes.</p>
+    <ul class="list" id="lista-pendientes"></ul>
+    <div id="enviar-foot" hidden style="margin:10px 0 4px">
+      <button class="btn btn-primary btn-block" id="btn-exportar">
+        📦 Crear archivo para enviar
+      </button>
+      <p class="hint center">Crea un archivo con tus órdenes y fotos. Queda guardado
+        abajo para que lo envíes por WhatsApp las veces que necesites.</p>
+    </div>
+
+    <h2 class="section-h">Archivos generados (para enviar a oficina)</h2>
+    <p class="hint" id="envios-vacio" hidden>Todavía no has creado ningún archivo.</p>
+    <div class="tw" id="envios-tw" hidden>
+      <div class="tw-head"><span class="tw-c1">Archivo</span><span class="tw-c2">Detalle</span></div>
+      <ul class="tw-body" id="lista-envios"></ul>
+    </div>
+    <p class="hint" style="margin-top:10px">Cada archivo tiene dos botones:
+      <b>📥 Descargar</b> (lo baja a esta PC/celular para cargarlo al sistema) y
+      <b>📤 Compartir</b> (lo envía por WhatsApp). Los archivos no se borran hasta que
+      tú los elimines.</p>
+  </section>
+
+  <!-- PANTALLA: MIS ÓRDENES (historial permanente) -->
+  <section class="screen" data-screen="historial">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Mis órdenes</h1>
+    </div>
+    <div class="searchbar">
+      <input id="buscar-hist" type="search" placeholder="Filtrar por N° de orden, serie o cliente">
+    </div>
+    <p class="list-count" id="hist-count"></p>
+    <p class="hint" id="hist-vacio" hidden>Todavía no has registrado órdenes.</p>
+    <ul class="list" id="lista-historial"></ul>
+    <p class="hint" style="margin-top:10px">Aquí queda el registro de todas tus órdenes.
+      Toca una para ver el detalle, reenviarla o marcarla como confirmada por oficina.
+      Las fotos se conservan ~15 días para no llenar tu celular; los datos se guardan siempre.</p>
+  </section>
+
+</main>
+
+<!-- Hoja modal: detalle de orden del historial -->
+<div class="sheet" id="sheet-orden" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="sheet-orden-titulo">Orden</h2>
+      <button class="sheet-close" id="sheet-orden-close">✕</button>
+    </div>
+    <div id="sheet-orden-body" style="overflow:auto"></div>
+    <button class="btn btn-primary btn-block" id="btn-orden-whatsapp" style="margin-top:10px">
+      📲 Enviar por WhatsApp (resumen + fotos)</button>
+    <div class="sticky-foot two" style="position:static;background:transparent;border:0;padding:10px 0 0">
+      <button class="btn btn-ghost" id="btn-orden-confirmar">Marcar confirmada</button>
+      <button class="btn btn-primary" id="btn-orden-reenviar">Reenviar archivo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hoja modal: elegir equipo -->
+<div class="sheet" id="sheet-equipo" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>Elegir equipo</h2>
+      <button class="sheet-close" id="sheet-equipo-close">✕</button>
+    </div>
+    <div class="searchbar">
+      <input id="sheet-buscar" type="search" placeholder="Serie, cliente o modelo">
+    </div>
+    <ul class="list sheet-list" id="sheet-lista"></ul>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast" hidden></div>
+
+<script src="lib/jszip.min.js"></script>
+<script src="lib/api.js"></script>
+<script src="lib/auth.js"></script>
+<script src="lib/wa.js"></script>
+<script src="db.js"></script>
+<script src="sync.js"></script>
+<script src="prosol_web.js"></script>
+<script src="app.js"></script>
+<!-- Hoja modal: escáner QR -->
+<div class="sheet" id="sheet-qr" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>Escanear código del equipo</h2>
+      <button class="sheet-close" id="sheet-qr-close">✕</button>
+    </div>
+    <video id="qr-video" playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    <p class="hint center" id="qr-estado">Apunta la cámara al QR pegado en el generador.</p>
+    <div class="add-row" style="margin-top:8px">
+      <input id="qr-manual" type="text" placeholder="O escribe la serie aquí">
+      <button class="mini-add" id="qr-manual-btn" style="background:var(--azul)">▼</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
