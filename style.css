@@ -463,6 +463,11 @@ body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-
   body.modo-admin .kpis{grid-template-columns:repeat(2,1fr)}
 }
 #seg-texto{width:100%;min-height:84px}
+/* v3.46: envío a oficina rastreado */
+#sheet-guardada [hidden],#nube-card [hidden]{display:none!important}
+.nube-chip{font-size:.72rem;font-weight:800;border-radius:8px;padding:3px 8px;white-space:nowrap;align-self:center}
+.nube-ok{background:#D5F5E3;color:#145A32}.nube-pend{background:#FDEBD0;color:#7E5109}.nube-err{background:#FADBD8;color:#922B21}
+.gd-nube{border-radius:10px;padding:10px 12px;background:#EEF4FA;font-weight:700;color:#1B4F72}
 /* M9-D (v3.45): estado de envío por destinatario */
 .env-lote{border:1px solid #E1E6EB;border-radius:10px;padding:8px 10px;margin:6px 0 8px;background:#FAFBFC}
 .env-d{white-space:normal;margin-top:2px}

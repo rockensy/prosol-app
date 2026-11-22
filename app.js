@@ -174,7 +174,7 @@ function ir(nombre, porAtras) {
   if (nombre === "clientes") pintarClientes();
   if (nombre === "contactos") { pintarContactos(); syncContactos(); }
   if (nombre === "programaciones") pintarProgramaciones();
-  if (nombre === "enviar") pintarPendientes();
+  if (nombre === "enviar") { pintarPendientes(); if (window._prosolRenderEnvio) window._prosolRenderEnvio(); }
   if (nombre === "historial") pintarHistorial();
   if (nombre === "oficina" || nombre === "inicio") pintarInicio();
   if (nombre === "hoy") { pintarHoy(); syncSolicitudes(); }
@@ -188,7 +188,7 @@ function refrescarSync() {
     dot.classList.add("ok");
     txt.textContent = "Cat. " + (cat.generado || "").slice(0, 10);
   } else { dot.classList.remove("ok"); txt.textContent = "Sin catálogo"; }
-  const n = estado.ordenes.length;
+  const n = pendOficina();
   $("#chip-pend-num").textContent = n;
   const set = (id, v) => { const el = $("#" + id); if (el) el.textContent = v; };
   set("badge-pend", n); set("hero-pend", n); set("badge-hist", estado.historial.length);
@@ -223,14 +223,19 @@ function pintarInicio() {
   // Aviso de pendientes (recordatorio visible para no perder trabajo)
   const av = $("#hero-aviso");
   if (av) {
-    const sinEmp = estado.ordenes.length;
-    const archSinEnv = estado.envios.filter(e => !e.enviado).length;
+    const nube = typeof API !== "undefined" && API.hayNube();
     const partes = [];
-    if (sinEmp) partes.push(`${sinEmp} orden(es) sin empaquetar`);
-    if (archSinEnv) partes.push(`${archSinEnv} archivo(s) sin enviar`);
+    if (nube) {
+      const p = pendOficina();
+      if (p) partes.push(`${p} orden(es) por enviar a oficina` + (navigator.onLine === false ? " (se envían solas cuando haya internet)" : ""));
+    } else {
+      const sinEmp = estado.ordenes.length, archSinEnv = estado.envios.filter(e => !e.enviado).length;
+      if (sinEmp) partes.push(`${sinEmp} orden(es) sin empaquetar`);
+      if (archSinEnv) partes.push(`${archSinEnv} archivo(s) sin enviar`);
+    }
     if (partes.length) {
       av.hidden = false;
-      av.innerHTML = "⚠️ Tienes " + partes.join(" y ") + ". Ve a “Enviar a oficina”.";
+      av.innerHTML = "⚠️ Tienes " + partes.join(" y ") + `. <button class="btn-mini btn-mini-verde" data-go="enviar" style="margin-left:6px">Ver / enviar</button>`;
     } else { av.hidden = true; }
   }
 }
@@ -834,8 +839,55 @@ function guardarOT() {
   estado._otCtx = null;
 
   guardarLocal(); refrescarSync();
-  toast("Orden guardada. Queda lista para enviar.", "ok");
   volver();
+  abrirGuardada(copia);
+}
+// ---- v3.46: al guardar la OT se ofrece WhatsApp (grupo técnico, cliente, otros) y se envía sola a oficina ----
+function estadoNubeTxt(o) {
+  if (typeof API === "undefined" || !API.hayNube()) return "Sin nube configurada: usa «Enviar a oficina» → respaldo en archivo.";
+  const s = window._prosolEstadoNube ? window._prosolEstadoNube(o) : { cod: "pend" };
+  if (s.cod === "ok") return "☁ Enviada a oficina ✅";
+  if (s.cod === "err") return "⚠ No se pudo enviar a oficina: " + (s.err || "") + " — se reintenta sola.";
+  return navigator.onLine === false ? "📴 Sin internet: se enviará sola a oficina cuando haya señal." : "☁ Enviando a oficina…";
+}
+function abrirGuardada(h) {
+  estado._guardada = h;
+  $("#gd-titulo").textContent = "Orden N° " + (h.NUMERO_OT || "—") + " guardada";
+  $("#gd-sub").textContent = (h.RAZON_SOCIAL || "") + " · Serie " + (h.SERIE || "") + " · " + (h.TIPO_OT || "");
+  const pinta = () => {
+    if (estado._guardada !== h) return;
+    $("#gd-nube").textContent = estadoNubeTxt(h);
+    const s = window._prosolEstadoNube ? window._prosolEstadoNube(h).cod : "pend";
+    $("#gd-reintentar").hidden = s === "ok" || typeof API === "undefined" || !API.hayNube();
+  };
+  pinta();
+  $("#sheet-guardada").hidden = false;
+  if (window._prosolSubirPendientes) Promise.resolve(window._prosolSubirPendientes({ silencioso: true })).then(pinta, pinta);
+  estado._gdPinta = pinta;
+}
+function enviarGuardadaWhatsApp() {
+  const h = estado._guardada; if (!h) return;
+  const idx = estado.historial.indexOf(h); if (idx < 0) return;
+  estado._ordenHist = idx;
+  $("#sheet-guardada").hidden = true;
+  enviarOrdenConDestinos();
+}
+// la nube avisa cuando una o más OT llegaron a oficina
+window._prosolTrasSubir = async () => {
+  const subidas = new Set(estado.historial.filter(h => window._prosolEstadoNube(h).cod === "ok").map(h => h.COD_TEMP));
+  estado.historial.forEach(h => { if (subidas.has(h.COD_TEMP)) h._enviada = true; });
+  // ya están en oficina: dejan de estar «sin empaquetar»
+  estado.ordenes = estado.ordenes.filter(o => !subidas.has(o.COD_TEMP));
+  await guardarLocal(); refrescarSync();
+  if (estado._pantalla === "enviar") pintarPendientes();
+  if (estado._pantalla === "historial") pintarHistorial();
+  if (estado._pantalla === "inicio" || estado._pantalla === "oficina") pintarInicio();
+  if (estado._gdPinta) estado._gdPinta();
+};
+// órdenes que faltan llegar a oficina (con nube: las no subidas; sin nube: las no empaquetadas)
+function pendOficina() {
+  if (typeof API !== "undefined" && API.hayNube() && window._prosolPendientesNube) return window._prosolPendientesNube();
+  return estado.ordenes.length;
 }
 
 // Marca como EJECUTADA la visita programada del equipo en Supabase y la retira del catálogo local
@@ -872,8 +924,9 @@ function pintarHistorial() {
   lista.forEach((h) => {
     const idx = estado.historial.indexOf(h);
     const fin = lotesDe(null, h.NUMERO_OT).filter(L => L.tipo === "FINAL").pop();
+    const sn = window._prosolEstadoNube && typeof API !== "undefined" && API.hayNube() ? window._prosolEstadoNube(h) : null;
     const estadoTxt = (h._confirmada ? "✅ confirmada"
-      : (h._enviada ? "📤 enviada" : "• sin enviar")) + (fin ? " · 📲 " + loteResumen(fin) : "");
+      : (sn ? sn.txt : (h._enviada ? "📤 enviada" : "• sin enviar"))) + (fin ? " · 📲 " + loteResumen(fin) : "");
     const li = document.createElement("li"); li.className = "row";
     li.innerHTML = `<div class="row-main">
         <div class="row-title">OT ${h.NUMERO_OT || "—"} · ${h.RAZON_SOCIAL || ""}</div>
@@ -900,6 +953,7 @@ function abrirOrdenHistorial(idx) {
       <div class="row-sub">Cliente</div><div class="row-title">${h.RAZON_SOCIAL || "—"}</div>
       <div class="row-sub" style="margin-top:6px">Serie ${h.SERIE} · ${h.FECHA} · ${h.TIPO_OT || ""}</div>
       <div class="row-sub">Horas: ${h.HORAS_MAQUINA ?? "—"} · Estado: ${h._confirmada?"confirmada por oficina":(h._enviada?"enviada":"sin enviar")}</div>
+      <div class="row-sub" style="white-space:normal"><b>Oficina:</b> ${ESC(estadoNubeTxt(h))}</div>
     </div>
     <div class="field-label">Actividades</div>
     <div style="margin:4px 0 10px;font-size:.92rem">${acts || "—"}</div>
@@ -1151,7 +1205,7 @@ async function exportarPaquete() {
   estado.ordenes = [];
   await guardarLocal();
   refrescarSync();
-  toast("Archivo creado y guardado abajo. Ahora compártelo a oficina.", "ok");
+  toast("Respaldo creado y guardado abajo.", "ok");
   // intentar compartir de una vez
   await compartirEnvio(envio);
   pintarPendientes();
@@ -1176,11 +1230,13 @@ async function compartirEnvio(envio) {
       return true;
     } catch (e) { /* canceló o no soportado: descargamos */ }
   }
-  // Descargar como respaldo (queda en el celular para adjuntarlo manual a WhatsApp)
+  // Android no deja compartir archivos .zip desde una app web: se guarda en Descargas
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = envio.nombre; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
-  toast("Archivo descargado. Adjúntalo en WhatsApp como Documento.", "ok");
+  const nube = typeof API !== "undefined" && API.hayNube();
+  toast(nube ? "Este celular no permite compartir .zip: quedó en Descargas. No hace falta: tus órdenes llegan a oficina por la nube (☁)."
+             : "Este celular no permite compartir .zip: quedó en Descargas. Adjúntalo en WhatsApp como Documento.", "ok");
   return false;
 }
 
@@ -1701,8 +1757,10 @@ async function quitarContacto() {
 }
 
 // ---- Destinatarios WhatsApp: grupo técnico → cliente → adicionales ----
-function abrirDestinos(o) {
+async function abrirDestinos(o) {
   estado._dest = o; estado._lote = null;
+  if (typeof API !== "undefined" && API.hayNube() && navigator.onLine !== false)
+    await Promise.race([syncContactos(true), new Promise(r => setTimeout(r, 3000))]);
   const todos = contactosTodos();
   const yo = (estado.tecnico || "").toLowerCase();
   $("#dest-titulo").textContent = o.titulo || "Enviar por WhatsApp";
@@ -2055,7 +2113,8 @@ function wire() {
     estado.envios = (await DB.get("envios::" + n)) || [];
     estado.seguim = (await DB.get("seguim::" + n)) || {}; estado.avQ = (await DB.get("avq::" + n)) || [];
     estado.waEnv = (await DB.get("waenv::" + n)) || {}; estado.envQ = (await DB.get("envq::" + n)) || [];
-    syncAvances(); syncEnvios();
+    syncAvances(); syncEnvios(); syncContactos(true);
+    if (window._prosolSubirPendientes) setTimeout(() => window._prosolSubirPendientes({ silencioso: true }), 800);
     await guardarLocal();
     ir("inicio");
     estado._hfVisto = false; setTimeout(mostrarHoyFlotante, 400);
@@ -2092,6 +2151,9 @@ function wire() {
   if ($("#sheet-orden-close")) $("#sheet-orden-close").onclick = () => $("#sheet-orden").hidden = true;
   if ($("#btn-orden-reenviar")) $("#btn-orden-reenviar").onclick = reenviarOrdenIndividual;
   if ($("#btn-orden-whatsapp")) $("#btn-orden-whatsapp").onclick = enviarOrdenConDestinos;
+  $("#gd-whatsapp").onclick = enviarGuardadaWhatsApp;
+  $("#gd-reintentar").onclick = () => { if (window._prosolSubirPendientes) Promise.resolve(window._prosolSubirPendientes()).then(() => estado._gdPinta && estado._gdPinta()); };
+  $("#gd-listo").onclick = $("#gd-cerrar").onclick = () => { $("#sheet-guardada").hidden = true; estado._guardada = null; };
   if ($("#btn-orden-confirmar")) $("#btn-orden-confirmar").onclick = toggleConfirmada;
   $("#btn-ot-desde-eq").onclick = () => abrirNuevaVisita(estado._equipoActual);
   if ($("#sheet-eq-edit-close")) $("#sheet-eq-edit-close").onclick = () => $("#sheet-eq-edit").hidden = true;
@@ -2209,7 +2271,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.45";
+const APP_VERSION = "v3.46";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2220,12 +2282,14 @@ async function init() {
   ir(estado.tecnico ? "inicio" : "login");
   pintarLogin();
   if (estado.tecnico) setTimeout(mostrarHoyFlotante, 600);
+  setTimeout(() => syncContactos(true), 1200);
   escucharArchivosEntrantes();
   await revisarArchivoCompartido();
   // Aviso al cerrar/recargar si hay órdenes sin empaquetar o archivos sin enviar
   window.addEventListener("beforeunload", (ev) => {
-    const sinEnviar = estado.ordenes.length;
-    const archivosSinEnviar = estado.envios.filter(e => !e.enviado).length;
+    const nube = typeof API !== "undefined" && API.hayNube();
+    const sinEnviar = nube ? pendOficina() : estado.ordenes.length;
+    const archivosSinEnviar = nube ? 0 : estado.envios.filter(e => !e.enviado).length;
     if (sinEnviar > 0 || archivosSinEnviar > 0) {
       ev.preventDefault(); ev.returnValue = "";
       return "";
