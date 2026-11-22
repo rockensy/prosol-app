@@ -29,6 +29,8 @@ const estado = {
   seguim: {},            // M9-C: etapas y avances por visita
   avQ: [],               // M9-C: avances pendientes de subir
   contactos: [],         // M9-C: contactos WhatsApp de la nube
+  waEnv: {},             // M9-D: lotes de envío WhatsApp con estado por destinatario
+  envQ: [],              // M9-D: estados de envío pendientes de subir (ot_envios)
   _pila: [], _pantalla: "login",
 };
 // Exponer estado y guardarLocal globalmente para que initSupabase (fuera de IIFE) pueda accederlos
@@ -75,6 +77,8 @@ async function guardarLocal() {
   if (estado.tecnico) {
     await DB.set("seguim::" + estado.tecnico, estado.seguim || {});
     await DB.set("avq::" + estado.tecnico, estado.avQ || []);
+    await DB.set("waenv::" + estado.tecnico, estado.waEnv || {});
+    await DB.set("envq::" + estado.tecnico, estado.envQ || []);
     await DB.set("ordenes::" + estado.tecnico, estado.ordenes);
     await DB.set("envios::" + estado.tecnico, estado.envios);
     await DB.set("historial::" + estado.tecnico, estado.historial);
@@ -88,6 +92,8 @@ async function cargarLocal() {
   const t = estado.tecnico;
   estado.seguim = t ? ((await DB.get("seguim::" + t)) || {}) : [];
   estado.avQ = t ? ((await DB.get("avq::" + t)) || []) : [];
+  estado.waEnv = t ? ((await DB.get("waenv::" + t)) || {}) : {};
+  estado.envQ = t ? ((await DB.get("envq::" + t)) || []) : [];
   estado.ordenes = t ? ((await DB.get("ordenes::" + t)) || []) : [];
   estado.envios = t ? ((await DB.get("envios::" + t)) || []) : [];
   estado.historial = t ? ((await DB.get("historial::" + t)) || []) : [];
@@ -116,7 +122,7 @@ async function cerrarSesion() {
   }
   await DB.set("tecnico", "");
   estado.tecnico = ""; estado.ordenes = []; estado.envios = []; estado.historial = [];
-  estado.seguim = {}; estado.avQ = []; estado._hfVisto = false;
+  estado.seguim = {}; estado.avQ = []; estado.waEnv = {}; estado.envQ = []; estado._hfVisto = false;
   refrescarSync();
   pintarLogin();
   ir("login");
@@ -598,10 +604,11 @@ function nuevaOT(equipo, tipo, ctx) {
   _ubicacionOT = null;
   // tipos
   const sel = $("#ot-tipo"); sel.innerHTML = "";
-  (estado.catalogo?.tipos_mantenimiento || ["MANTENIMIENTO GENERAL"]).forEach(t => {
+  (estado.catalogo?.tipos_mantenimiento || [TERMINO_PREV]).forEach(t => {
     const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o);
   });
-  if (tipo) sel.value = tipo;
+  if (tipo) sel.value = tipoEnCatalogo(tipo);
+  pintarSelectorActividades();
   // equipo
   if (equipo && equipo.SERIE) setEquipoOT(equipo);
   else { estado._otEquipo = null; $("#ot-serie").value = ""; $("#ot-cliente-info").textContent = ""; }
@@ -615,15 +622,49 @@ function nuevaOT(equipo, tipo, ctx) {
 function cargarActividadesDelTipo() {
   const tipo = $("#ot-tipo").value;
   const subs = (estado.catalogo?.combos || {})[tipo] || [];
-  // conservar solo las adicionales (las que no son rubro ni sub del combo)
-  const adicionales = estado.actividades.filter(a => a.tipo === "adicional");
+  // conservar solo las adicionales (y las sub-actividades de combos agregados aparte)
+  const adicionales = estado.actividades.filter(a => a.tipo === "adicional" || a.tipo === "adsub");
   estado.actividades = [];
   if (tipo) {
     estado.actividades.push({ tipo: "rubro", texto: tipo });
-    subs.forEach(s => estado.actividades.push({ tipo: "sub", texto: s }));
+    // una actividad INDIVIDUAL como tipo principal se aplica sola (no se repite como sub)
+    if (!(subs.length === 1 && subs[0] === tipo)) subs.forEach(s => estado.actividades.push({ tipo: "sub", texto: s }));
   }
   adicionales.forEach(a => estado.actividades.push(a));
   pintarActividades();
+}
+// ---- M9-D (v3.45): catálogo completo de actividades aplicable como combo o individual ----
+const TERMINO_PREV = "MANTENIMIENTO PREVENTIVO";
+const SIN_PREV = ["MANTENIMIENTO GENERAL", "MANTENIMIENTO COMPLETO", "MANTENIMIENTO PREVENTIVO", "PREVENTIVO"];
+// Si la visita trae un sinónimo del preventivo, se elige el combo universal del catálogo.
+function tipoEnCatalogo(t) {
+  const lista = estado.catalogo?.tipos_mantenimiento || [];
+  const u = String(t || "").trim().toUpperCase();
+  const igual = lista.find(x => String(x).toUpperCase() === u);
+  if (igual) return igual;
+  if (SIN_PREV.includes(u)) return lista.find(x => SIN_PREV.includes(String(x).toUpperCase())) || t;
+  return t;
+}
+function pintarSelectorActividades() {
+  const sel = $("#ot-act-cat"); if (!sel) return;
+  const combos = estado.catalogo?.combos || {}, tipos = estado.catalogo?.tipos_mantenimiento || [];
+  const esCombo = (t) => (combos[t] || []).length > 1 || ((combos[t] || []).length === 1 && combos[t][0] !== t);
+  const opt = (t) => `<option value="${ESC(t)}">${ESC(t)}</option>`;
+  const cs = tipos.filter(esCombo), ind = tipos.filter(t => !esCombo(t));
+  sel.innerHTML = `<option value="">＋ Agregar actividad del catálogo (${tipos.length})…</option>` +
+    (cs.length ? `<optgroup label="Combos">${cs.map(opt).join("")}</optgroup>` : "") +
+    (ind.length ? `<optgroup label="Individuales">${ind.map(opt).join("")}</optgroup>` : "");
+}
+function agregarActividadCatalogo(t) {
+  if (!t) return;
+  const ya = estado.actividades.some(a => String(a.texto).toLowerCase() === t.toLowerCase());
+  if (ya) { toast("Esa actividad ya está en la orden.", "err"); return; }
+  const subs = (estado.catalogo?.combos || {})[t] || [];
+  const combo = subs.length > 1 || (subs.length === 1 && subs[0] !== t);
+  estado.actividades.push({ tipo: "adicional", texto: t, combo });
+  if (combo) subs.forEach(s => estado.actividades.push({ tipo: "adsub", texto: s }));
+  pintarActividades();
+  toast((combo ? "Combo agregado: " : "Actividad agregada: ") + t, "ok");
 }
 function setEquipoOT(e) {
   estado._otEquipo = e;
@@ -641,7 +682,12 @@ function pintarActividades() {
     const x = a.tipo === "rubro" ? "" : `<span class="x" data-i="${i}">✕</span>`;
     li.innerHTML = `<span class="act-tx">${a.texto}</span>${x}`;
     const btn = li.querySelector(".x");
-    if (btn) btn.onclick = () => { estado.actividades.splice(i, 1); pintarActividades(); };
+    if (btn) btn.onclick = () => {
+      // quitar un combo agregado retira también sus sub-actividades
+      let n = 1;
+      if (a.tipo === "adicional" && a.combo) while (estado.actividades[i + n] && estado.actividades[i + n].tipo === "adsub") n++;
+      estado.actividades.splice(i, n); pintarActividades();
+    };
     ul.appendChild(li);
   });
 }
@@ -752,7 +798,7 @@ function guardarOT() {
     GPS_LAT: _ubicacionOT?.lat || null,
     GPS_LON: _ubicacionOT?.lon || null,
     ACTIVIDADES: estado.actividades.map(d => ({
-      DESCRIPCION: d.texto, CANTIDAD: 1, VALOR: 0, NIVEL: d.tipo
+      DESCRIPCION: d.texto, CANTIDAD: 1, VALOR: 0, NIVEL: d.tipo === "adsub" ? "sub" : d.tipo
     })),
     REPUESTOS: [],
     FOTOS: [],
@@ -825,8 +871,9 @@ function pintarHistorial() {
   cont.innerHTML = "";
   lista.forEach((h) => {
     const idx = estado.historial.indexOf(h);
-    const estadoTxt = h._confirmada ? "✅ confirmada"
-      : (h._enviada ? "📤 enviada" : "• sin enviar");
+    const fin = lotesDe(null, h.NUMERO_OT).filter(L => L.tipo === "FINAL").pop();
+    const estadoTxt = (h._confirmada ? "✅ confirmada"
+      : (h._enviada ? "📤 enviada" : "• sin enviar")) + (fin ? " · 📲 " + loteResumen(fin) : "");
     const li = document.createElement("li"); li.className = "row";
     li.innerHTML = `<div class="row-main">
         <div class="row-title">OT ${h.NUMERO_OT || "—"} · ${h.RAZON_SOCIAL || ""}</div>
@@ -861,7 +908,8 @@ function abrirOrdenHistorial(idx) {
     ${h.GPS_LAT && h.GPS_LON ? `<div class="row-sub" style="margin-bottom:6px">📍
       <a href="https://maps.google.com/?q=${h.GPS_LAT},${h.GPS_LON}" target="_blank"
         style="color:var(--azul)">Ver ubicación del servicio en el mapa</a></div>` : ""}
-    <div class="row-sub">📷 ${fotosInfo}</div>`;
+    <div class="row-sub">📷 ${fotosInfo}</div>
+    ${envBloqueHTML((() => { const sg = sgDeOT(h); return lotesDe(sg ? sg.key : null, h.NUMERO_OT); })())}`;
   $("#btn-orden-confirmar").textContent = h._confirmada ? "Quitar confirmación" : "Marcar confirmada";
   $("#sheet-orden").hidden = false;
 }
@@ -1375,7 +1423,7 @@ function abrirNuevaVisita(equipo) {
   $("#nv-progs").hidden = true;
   document.querySelector('input[name="nv-clase"][value="NO_PROGRAMADA"]').checked = true;
   const sel = $("#nv-tipo"); sel.innerHTML = "";
-  (estado.catalogo.tipos_mantenimiento || ["MANTENIMIENTO GENERAL"]).forEach(t => {
+  (estado.catalogo.tipos_mantenimiento || [TERMINO_PREV]).forEach(t => {
     const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o);
   });
   if (equipo && equipo.SERIE) setEquipoNV(equipo); else actualizarBotonNV();
@@ -1397,7 +1445,7 @@ function crearVisitaNV() {
   if (!e || !e.SERIE) { toast("Elige el equipo primero.", "err"); return; }
   const motivo = $("#nv-motivo").value.trim();
   if (motivo.length < 3) { toast("Escribe el motivo de la visita.", "err"); return; }
-  const clase = claseNV(), tipo = $("#nv-tipo").value || "MANTENIMIENTO GENERAL", sup = esSup();
+  const clase = claseNV(), tipo = $("#nv-tipo").value || TERMINO_PREV, sup = esSup();
   const cli = clientePorId(e.ID_CLIENTE), ahora = new Date().toISOString();
   const s = { id: "L-" + uid(8), _nuevo: true, serie: e.SERIE, id_equipo: e.ID_SB || null,
     id_cliente: cli?.ID_SB || e.ID_CLIENTE || null, cliente_nombre: cli?.RAZON_SOCIAL || "", clase, tipo_mantenimiento: tipo,
@@ -1412,7 +1460,7 @@ function crearVisitaNV() {
 
 // Catálogo anterior a M9-B (sin roles ni vínculo de clientes): se baja de nuevo una vez.
 function autoActualizarCatalogo() {
-  if (!estado.catalogo || (estado.catalogo.rev || 0) >= 3 || !navigator.onLine || autoActualizarCatalogo._ya
+  if (!estado.catalogo || !navigator.onLine || autoActualizarCatalogo._ya
       || !window._prosolSincronizarCatalogoSupabase || typeof API === "undefined" || !API.hayNube()) return;
   autoActualizarCatalogo._ya = true;
   toast("Actualizando catálogo…", "");
@@ -1654,7 +1702,7 @@ async function quitarContacto() {
 
 // ---- Destinatarios WhatsApp: grupo técnico → cliente → adicionales ----
 function abrirDestinos(o) {
-  estado._dest = o;
+  estado._dest = o; estado._lote = null;
   const todos = contactosTodos();
   const yo = (estado.tecnico || "").toLowerCase();
   $("#dest-titulo").textContent = o.titulo || "Enviar por WhatsApp";
@@ -1679,7 +1727,7 @@ function abrirDestinos(o) {
     <button class="btn btn-ghost btn-block" id="dest-compartir" style="margin-top:8px">📤 ${hayFiles ? "Compartir con fotos/video… (eliges el chat o grupo)" : "Compartir… (eliges el chat o grupo)"}</button>
     ${hayFiles ? `<p class="hint">WhatsApp solo adjunta fotos y videos con «Compartir…». El envío directo manda el texto.</p>` : ""}`;
   $("#dest-enviar").onclick = armarColaDestinos;
-  $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, o.files, o.titulo)) { if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; } };
+  $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, o.files, o.titulo)) { registrarCompartido(o); if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); } };
   $("#sheet-dest").hidden = false;
   syncContactos();
 }
@@ -1695,16 +1743,92 @@ function armarColaDestinos() {
   if (otro) dest.push({ nombre: "Otro número", tel: otro });
   const vistos = new Set(); const unicos = dest.filter(d => !vistos.has(d.tel) && vistos.add(d.tel));
   if (!unicos.length) { toast("Marca al menos un destinatario.", "err"); return; }
-  $("#dest-cuerpo").innerHTML = `<p class="hint">Toca cada destinatario: se abre WhatsApp con el mensaje listo y tú pulsas Enviar.</p>` +
-    unicos.map((d, i) => `<div class="row dest-q" data-i="${i}"><div class="row-main"><div class="row-title">${ESC(d.nombre)}</div><div class="row-sub">+${d.tel}</div></div>
-      <button class="btn btn-primary" style="min-height:42px;padding:0 14px">Abrir ▶</button></div>`).join("");
+  pintarCola(nuevoLote(o, unicos), o, false);
+}
+// ---- M9-D (v3.45): estado de envío por destinatario (bitácora local + tabla ot_envios) ----
+// wa.me no informa si el mensaje salió: se registra lo que sí se sabe (Abierto en WhatsApp / Compartido / Pendiente).
+const ENV_EST = { PENDIENTE: "⏳ Pendiente", ABIERTO: "✓ Abierto en WhatsApp", COMPARTIDO: "📤 Compartido" };
+const ENV_TIPO = { ETAPA: "Aviso de etapa", PARCIAL: "Avance parcial", FINAL: "Reporte final" };
+async function guardarEnv() {
+  if (!estado.tecnico) return;
+  await DB.set("waenv::" + estado.tecnico, estado.waEnv || {});
+  await DB.set("envq::" + estado.tecnico, estado.envQ || []);
+}
+function nuevoLote(o, dest) {
+  const r = o.reg || {}, id = "L" + Date.now().toString(36) + uid(6);
+  const L = { lote: id, tipo: r.tipo || "FINAL", key: r.key || null, numero_ot: r.numero_ot || null, serie: r.serie || "",
+    titulo: o.titulo || "", texto: o.texto || "", t: new Date().toISOString(),
+    dest: dest.map(d => ({ nombre: d.nombre, tel: d.tel || "", estado: "PENDIENTE", t: null })) };
+  (estado.waEnv = estado.waEnv || {})[id] = L; guardarEnv();
+  return L;
+}
+function marcarEnvio(L, d, est) {
+  d.estado = est; d.t = new Date().toISOString(); d._sub = true;
+  (estado.envQ = estado.envQ || []).push({ fila: { lote: L.lote, tipo: L.tipo, clave_visita: L.key, numero_ot: L.numero_ot, serie: L.serie,
+    tecnico: estado.tecnico, destinatario: d.nombre, telefono: d.tel || null, estado: est, ocurrio: d.t } });
+  guardarEnv(); syncEnvios();
+}
+function cerrarLote(L) {
+  if (!L || L._cerrado) return;
+  L._cerrado = true;
+  L.dest.forEach(d => { if (d.estado === "PENDIENTE" && !d._sub) marcarEnvio(L, d, "PENDIENTE"); });
+  guardarEnv();
+}
+const lotePend = L => L.dest.filter(d => d.estado === "PENDIENTE");
+const loteResumen = L => (L.dest.length - lotePend(L).length) + "/" + L.dest.length;
+function lotesDe(key, numero) {
+  return Object.values(estado.waEnv || {}).filter(L => (key && L.key === key) || (numero && L.numero_ot && String(L.numero_ot) === String(numero)))
+    .sort((a, b) => a.t.localeCompare(b.t));
+}
+let _envBusy = false;
+async function syncEnvios() {
+  if (_envBusy || typeof API === "undefined" || !API.hayNube() || !navigator.onLine || !(estado.envQ || []).length) return;
+  _envBusy = true;
+  try { let r; while ((r = (estado.envQ || [])[0])) { await API.insert("ot_envios", r.fila); estado.envQ = estado.envQ.filter(x => x !== r); } } catch (x) { /* sin red: queda en cola */ }
+  finally { _envBusy = false; guardarEnv(); }
+}
+function pintarCola(L, o, soloPend) {
+  estado._lote = L; L._cerrado = false;
+  const lista = L.dest.map((d, i) => ({ d, i })).filter(x => !soloPend || x.d.estado === "PENDIENTE");
+  const fila = ({ d, i }) => `<div class="row dest-q ${d.estado !== "PENDIENTE" ? "hecho" : ""}" data-i="${i}"><div class="row-main"><div class="row-title">${ESC(d.nombre)}</div>
+      <div class="row-sub">+${ESC(d.tel)} · <b class="env-est">${ENV_EST[d.estado]}</b></div></div>
+      <button class="btn btn-primary" style="min-height:42px;padding:0 14px">${d.estado === "PENDIENTE" ? "Abrir ▶" : "Abrir otra vez"}</button></div>`;
+  $("#dest-cuerpo").innerHTML = `<p class="hint">Toca cada destinatario: se abre WhatsApp con el mensaje listo y tú pulsas Enviar. Queda registrado el estado de cada uno.</p>` +
+    lista.map(fila).join("") + `<p class="hint" id="dest-cont"></p>`;
+  const cont = () => { $("#dest-cont").textContent = "Abiertos " + loteResumen(L) + (lotePend(L).length ? " · pendientes " + lotePend(L).length : " · todos abiertos"); };
   $$("#dest-cuerpo .dest-q").forEach(r => r.querySelector("button").onclick = () => {
-    const d = unicos[Number(r.dataset.i)];
-    try { window.open("https://wa.me/" + d.tel + "?text=" + encodeURIComponent(o.texto), "_blank"); } catch (x) { /* popup bloqueado */ }
-    r.classList.add("hecho"); r.querySelector("button").textContent = "✓ Abierto";
+    const d = L.dest[Number(r.dataset.i)];
+    try { window.open("https://wa.me/" + d.tel + "?text=" + encodeURIComponent(L.texto), "_blank"); } catch (x) { /* popup bloqueado */ }
+    marcarEnvio(L, d, "ABIERTO");
+    r.classList.add("hecho"); r.querySelector("button").textContent = "Abrir otra vez"; r.querySelector(".env-est").textContent = ENV_EST.ABIERTO; cont();
   });
+  cont();
   $("#dest-pie").innerHTML = `<button class="btn btn-primary btn-block" id="dest-listo">Listo</button>`;
-  $("#dest-listo").onclick = () => { if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; };
+  $("#dest-listo").onclick = () => { cerrarLote(L); estado._lote = null; if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); };
+}
+function registrarCompartido(o) {
+  const L = nuevoLote(o, [{ nombre: "Compartir… (chat o grupo elegido en el teléfono)", tel: "" }]);
+  marcarEnvio(L, L.dest[0], "COMPARTIDO"); L._cerrado = true; guardarEnv();
+}
+function reenviarPendientes(lote) {
+  const L = (estado.waEnv || {})[lote]; if (!L || !lotePend(L).length) return;
+  $("#dest-titulo").textContent = "Reenviar · " + (L.titulo || ENV_TIPO[L.tipo]);
+  pintarCola(L, { titulo: L.titulo, texto: L.texto }, true);
+  $("#sheet-dest").hidden = false;
+}
+function refrescarEnvViews() {
+  if (!$("#sheet-seg").hidden && estado._segIt) abrirSeg(estado._segIt);
+  if (!$("#sheet-orden").hidden && estado._ordenHist != null) abrirOrdenHistorial(estado._ordenHist);
+  if (estado._pantalla === "historial") pintarHistorial();
+}
+function envBloqueHTML(lotes) {
+  if (!lotes.length) return "";
+  return `<div class="field-label">Envíos por WhatsApp</div>` + lotes.slice().reverse().map(L => {
+    const p = lotePend(L).length;
+    return `<div class="env-lote"><div class="row-title" style="white-space:normal">${ESC(ENV_TIPO[L.tipo] || L.tipo)} · ${ESC(hhmm(L.t))} · abiertos ${loteResumen(L)}</div>` +
+      L.dest.map(d => `<div class="row-sub env-d env-${d.estado.toLowerCase()}">${ENV_EST[d.estado]} — ${ESC(d.nombre)}${d.tel ? " +" + ESC(d.tel) : ""}</div>`).join("") +
+      (p ? `<button class="btn btn-ghost env-reenv" data-lote="${ESC(L.lote)}" style="min-height:38px;margin-top:6px">📲 Reenviar a pendientes (${p})</button>` : "") + `</div>`;
+  }).join("");
 }
 async function compartirNativo(texto, files, titulo) {
   const d = { text: texto, title: titulo || "PROSOL" };
@@ -1732,6 +1856,9 @@ function migrarSeg(viejo, nuevo) {
   if (viejo === nuevo) return;
   if (estado.seguim && estado.seguim[viejo]) { estado.seguim[nuevo] = estado.seguim[viejo]; estado.seguim[nuevo].key = nuevo; delete estado.seguim[viejo]; }
   (estado.avQ || []).forEach(r => { if (r.fila.clave_visita === viejo) r.fila.clave_visita = nuevo; });
+  Object.values(estado.waEnv || {}).forEach(L => { if (L.key === viejo) L.key = nuevo; });
+  (estado.envQ || []).forEach(r => { if (r.fila.clave_visita === viejo) r.fila.clave_visita = nuevo; });
+  guardarEnv();
   if (estado._otCtx && estado._otCtx.segKey === viejo) estado._otCtx.segKey = nuevo;
   guardarSeg();
 }
@@ -1746,7 +1873,7 @@ let _avBusy = false;
 async function syncAvances() {
   if (_avBusy || typeof API === "undefined" || !API.hayNube() || !navigator.onLine || !(estado.avQ || []).length) return;
   _avBusy = true;
-  try { for (const r of (estado.avQ || []).slice()) { try { await API.insert("ot_avances", r.fila); estado.avQ = estado.avQ.filter(x => x !== r); } catch (x) { break; } } }
+  try { let r; while ((r = (estado.avQ || [])[0])) { await API.insert("ot_avances", r.fila); estado.avQ = estado.avQ.filter(x => x !== r); } } catch (x) { /* sin red: queda en cola */ }
   finally { _avBusy = false; guardarSeg(); }
 }
 function itemDeTarjeta(k, id) {
@@ -1778,13 +1905,52 @@ function msgParcial(it, texto, n) {
   L.push("", "_Información preliminar: se confirma en el reporte final de la OT._", "— PROSOL Campo —");
   return L.join("\n");
 }
+// M9-D (v3.45): reporte final agrupado — orden + origen/autorización + etapas con tiempos + avances + avisos enviados
+function sgDeOT(h) { return Object.values(estado.seguim || {}).find(s => s.numero_ot && String(s.numero_ot) === String(h.NUMERO_OT)) || null; }
+function durTxt(a, b) {
+  const m = Math.round((Date.parse(b) - Date.parse(a)) / 60000);
+  if (!(m >= 0)) return "";
+  return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") + " min";
+}
 function avancesTexto(h) {
-  const sg = Object.values(estado.seguim || {}).find(s => s.numero_ot && String(s.numero_ot) === String(h.NUMERO_OT));
-  if (!sg || (!sg.ev.length && !sg.av.length)) return "";
-  const L = ["", "*Seguimiento de la visita:*"];
-  sg.ev.forEach(x => L.push("• " + etapaTxt(x.e) + " — " + hhmm(x.t)));
-  sg.av.forEach(x => L.push("• Avance parcial " + hhmm(x.t) + ": " + (x.texto || "(adjuntos)")));
+  const sg = sgDeOT(h), L = [];
+  const clase = h.CLASE_VISITA || "";
+  if (clase) {
+    L.push("", "*Origen de la visita:* " + (CLASE_TXT[clase] || clase));
+    const s = h.SOLICITUD_ID ? (estado.solicitudes || []).find(x => String(x.id) === String(h.SOLICITUD_ID)) : null;
+    if (s) {
+      if (s.solicitante) L.push("Solicitada por: " + s.solicitante);
+      if (s.motivo) L.push("Motivo: " + s.motivo);
+      if (s.estado === "AUTORIZADA") L.push("Autorizada por: " + (s.autorizado_por || "—") + (s.fecha_resolucion ? " · " + hhmm(s.fecha_resolucion) : ""));
+      else L.push("Autorización: " + (s.estado || "PENDIENTE") + (clase === "URGENTE" ? " (urgencia atendida antes de autorizar)" : ""));
+    }
+  }
+  if (sg && (sg.ev.length || sg.av.length)) {
+    L.push("", "*Seguimiento de la visita:*");
+    sg.ev.forEach(x => L.push("• " + etapaTxt(x.e) + " — " + hhmm(x.t)));
+    const t1 = (e) => { const x = sg.ev.find(v => v.e === e); return x ? x.t : null; };
+    const tr = t1("EN_CAMINO") && t1("EN_SITIO") ? durTxt(t1("EN_CAMINO"), t1("EN_SITIO")) : "";
+    const si = t1("EN_SITIO") && t1("FINALIZADA") ? durTxt(t1("EN_SITIO"), t1("FINALIZADA")) : "";
+    const tot = sg.ev.length && t1("FINALIZADA") ? durTxt(sg.ev[0].t, t1("FINALIZADA")) : "";
+    if (tr) L.push("Tiempo de traslado: " + tr);
+    if (si) L.push("Tiempo en sitio: " + si);
+    if (tot) L.push("Duración total: " + tot);
+    if (sg.av.length) {
+      L.push("", "*Avances parciales (presuntivos):*");
+      sg.av.forEach(x => L.push("• " + hhmm(x.t) + ": " + (x.texto || "(adjuntos)") + (x.n ? " · 📎 " + x.n : "")));
+    }
+  }
+  const av = lotesDe(sg ? sg.key : null, h.NUMERO_OT).filter(x => x.tipo !== "FINAL");
+  if (av.length) {
+    const tot = av.reduce((a, x) => a + x.dest.length, 0), ab = av.reduce((a, x) => a + x.dest.length - lotePend(x).length, 0);
+    L.push("", "*Avisos enviados durante la visita:* " + av.length + " · destinatarios abiertos " + ab + "/" + tot);
+  }
   return L.join("\n");
+}
+function reporteFinalTexto(h) {
+  const base = resumenOrdenTexto(h).split("\n"), pie = base[base.length - 1].indexOf("PROSOL Campo") >= 0 ? base.pop() : "";
+  const ex = avancesTexto(h);
+  return base.join("\n") + (ex ? "\n" + ex : "") + (pie ? "\n\n" + pie : "");
 }
 function abrirSeg(it) {
   estado._segIt = it; estado._segFiles = [];
@@ -1797,7 +1963,8 @@ function abrirSeg(it) {
     anotarSeg(key, it.serie, "ETAPA", b.dataset.e); abrirSeg(it); pintarHoy(); toast("Etapa: " + etapaTxt(b.dataset.e), "ok");
   });
   $("#seg-texto").value = ""; $("#seg-archivos-info").textContent = "";
-  const log = [].concat(sg.ev.map(x => ({ t: x.t, h: etapaTxt(x.e) })), sg.av.map(x => ({ t: x.t, h: "Avance parcial" + (x.n ? " · 📎" + x.n : ""), d: x.texto }))).sort((a, b) => b.t.localeCompare(a.t));
+  const log = [].concat(sg.ev.map(x => ({ t: x.t, h: etapaTxt(x.e) })), sg.av.map(x => ({ t: x.t, h: "Avance parcial" + (x.n ? " · 📎" + x.n : ""), d: x.texto })),
+    lotesDe(key, sg.numero_ot).map(L => ({ t: L.t, h: "📲 " + (ENV_TIPO[L.tipo] || L.tipo) + " · abiertos " + loteResumen(L), d: lotePend(L).length ? "Pendientes: " + lotePend(L).map(d => d.nombre).join(", ") : "" }))).sort((a, b) => b.t.localeCompare(a.t));
   $("#seg-log").innerHTML = log.length ? log.map(x => `<li class="tl-item"><div class="tl-date">${ESC(hhmm(x.t))} · ${ESC(x.h)}</div>${x.d ? `<div class="tl-acts">${ESC(x.d)}</div>` : ""}</li>`).join("") : `<li class="hint">Aún sin registros.</li>`;
   $("#sheet-seg").hidden = false;
 }
@@ -1806,7 +1973,8 @@ function segAvisarEtapa() {
   const it = estado._segIt; if (!it) return;
   const sg = segDe(it.k + ":" + it.id, false);
   const et = sg ? sg.etapa : "PROGRAMADA";
-  abrirDestinos({ titulo: "Avisar: " + etapaTxt(et), texto: msgEtapa(it, et), files: [], cliente: datosClienteIt(it) });
+  abrirDestinos({ titulo: "Avisar: " + etapaTxt(et), texto: msgEtapa(it, et), files: [], cliente: datosClienteIt(it),
+    reg: { tipo: "ETAPA", key: it.k + ":" + it.id, serie: it.serie, numero_ot: sg ? sg.numero_ot : null } });
 }
 function segInformarParcial() {
   const it = estado._segIt; if (!it) return;
@@ -1816,12 +1984,14 @@ function segInformarParcial() {
   const msg = msgParcial(it, texto, files.length);
   const sg = segDe(it.k + ":" + it.id, false);
   $("#sheet-seg").hidden = true; pintarHoy();
-  abrirDestinos({ titulo: "Avance parcial (presuntivo)", texto: msg, files, cliente: datosClienteIt(it), clienteDefault: true });
+  abrirDestinos({ titulo: "Avance parcial (presuntivo)", texto: msg, files, cliente: datosClienteIt(it), clienteDefault: true,
+    reg: { tipo: "PARCIAL", key: it.k + ":" + it.id, serie: it.serie, numero_ot: sg ? sg.numero_ot : null } });
 }
 function cerrarSegPorOT(ctx, numero) {
   if (!ctx || !ctx.segKey) return;
   const serie = ctx.visita ? ctx.visita.SERIE : (ctx.sol ? ctx.sol.serie : "");
   const sg = segDe(ctx.segKey, true); sg.numero_ot = numero;
+  lotesDe(ctx.segKey, null).forEach(L => { if (!L.numero_ot) L.numero_ot = numero; }); guardarEnv();
   anotarSeg(ctx.segKey, serie, "ETAPA", "FINALIZADA");
 }
 function fotosComoFiles(h) {
@@ -1838,8 +2008,10 @@ function fotosComoFiles(h) {
 function enviarOrdenConDestinos() {
   const h = estado.historial[estado._ordenHist]; if (!h) return;
   const eq = equipoPorSerie(h.SERIE), c = clientePorId(eq ? eq.ID_CLIENTE : null);
-  abrirDestinos({ titulo: "Reporte final · OT " + (h.NUMERO_OT || ""), texto: resumenOrdenTexto(h) + avancesTexto(h), files: fotosComoFiles(h),
+  const sg = sgDeOT(h);
+  abrirDestinos({ titulo: "Reporte final · OT " + (h.NUMERO_OT || ""), texto: reporteFinalTexto(h), files: fotosComoFiles(h),
     cliente: { nombre: h.RAZON_SOCIAL, tel: c ? c.TELEFONO : "" }, clienteDefault: true,
+    reg: { tipo: "FINAL", key: sg ? sg.key : null, numero_ot: h.NUMERO_OT, serie: h.SERIE },
     alTerminar: () => { h._enviada = true; guardarLocal(); pintarHistorial(); } });
 }
 
@@ -1864,7 +2036,9 @@ function wire() {
     estado._segFiles = (estado._segFiles || []).concat(Array.from(e.target.files)); e.target.value = "";
     $("#seg-archivos-info").textContent = estado._segFiles.length + " archivo(s) listo(s) para compartir.";
   };
-  $("#dest-cerrar").onclick = () => { $("#sheet-dest").hidden = true; };
+  $("#dest-cerrar").onclick = () => { if (estado._lote) { cerrarLote(estado._lote); estado._lote = null; refrescarEnvViews(); } $("#sheet-dest").hidden = true; };
+  $("#sheet-orden-body").addEventListener("click", (e) => { const b = e.target.closest(".env-reenv"); if (b) reenviarPendientes(b.dataset.lote); });
+  window.addEventListener("online", () => { syncAvances(); syncEnvios(); });
   $("#ct-cerrar").onclick = () => { $("#sheet-contacto").hidden = true; };
   $("#ct-guardar").onclick = guardarContacto; $("#ct-quitar").onclick = quitarContacto;
   $("#btn-contacto-nuevo").onclick = () => abrirContacto(null);
@@ -1880,6 +2054,8 @@ function wire() {
     estado.ordenes = (await DB.get("ordenes::" + n)) || [];
     estado.envios = (await DB.get("envios::" + n)) || [];
     estado.seguim = (await DB.get("seguim::" + n)) || {}; estado.avQ = (await DB.get("avq::" + n)) || [];
+    estado.waEnv = (await DB.get("waenv::" + n)) || {}; estado.envQ = (await DB.get("envq::" + n)) || [];
+    syncAvances(); syncEnvios();
     await guardarLocal();
     ir("inicio");
     estado._hfVisto = false; setTimeout(mostrarHoyFlotante, 400);
@@ -1946,6 +2122,7 @@ function wire() {
   };
   $("#ot-act-nueva").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-add-act").click(); });
   $("#ot-tipo").addEventListener("change", cargarActividadesDelTipo);
+  $("#ot-act-cat").addEventListener("change", (e) => { agregarActividadCatalogo(e.target.value); e.target.value = ""; });
   $("#file-foto").onchange = async (e) => {
     for (const f of e.target.files) {
       const d = await procesarFoto(f);
@@ -2032,7 +2209,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.44";
+const APP_VERSION = "v3.45";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2267,7 +2444,7 @@ function initSupabase() {
         if ((a.tipo||'').toUpperCase() === 'COMBO') {
           // Buscar ítems de este combo en actividad_items
           const items = actItems
-            .filter(i => i.id_actividad === a.id)
+            .filter(i => i.id_actividad === a.id && (i.orden == null || Number(i.orden) >= 0))
             .sort((x, y) => (x.orden||0) - (y.orden||0))
             .map(i => i.descripcion || '');
           combosObj[a.descripcion] = items;
@@ -2286,7 +2463,7 @@ function initSupabase() {
         .sort();
       _e.catalogo.tipos_mantenimiento = acts.length > 0
         ? [...combosOrden, ...indivOrden]
-        : ['MANTENIMIENTO GENERAL', 'MANTENIMIENTO CORRECTIVO',
+        : ['MANTENIMIENTO PREVENTIVO', 'MANTENIMIENTO CORRECTIVO',
            'MANTENIMIENTO INTERNO', 'MANTENIMIENTO EXTERNO',
            'ARRANQUE INICIAL', 'VISITA EXPRESS + CAMBIO DE ACEITE'];
       _e.catalogo.combos = combosObj;
