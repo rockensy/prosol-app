@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.49</strong>
+        <strong>Versión PROSOL v3.50</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.49';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.50';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.49</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.50</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2406,8 +2406,28 @@ window.addEventListener('DOMContentLoaded', () => {
   // Solo en pantalla PC
   if (window.innerWidth >= 700) {
     mostrarLogin();
+    activarActualizacionPC();
   }
 });
+
+/* v3.50: la vista PC también busca la versión nueva al abrir y se recarga sola al activarla
+   (antes solo lo hacía la vista celular y el PC quedaba en la versión anterior). */
+function activarActualizacionPC() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).then((reg) => {
+    let recargado = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (recargado) return; recargado = true; location.reload();
+    });
+    reg.addEventListener('updatefound', () => {
+      const nuevo = reg.installing; if (!nuevo) return;
+      nuevo.addEventListener('statechange', () => {
+        if (nuevo.state === 'installed' && navigator.serviceWorker.controller) nuevo.postMessage('activar-ya');
+      });
+    });
+    reg.update().catch(() => {});
+  }).catch(() => { /* sin service worker la vista PC sigue funcionando */ });
+}
 
 _irConfig = function() {
   const a = document.getElementById('aviso-sin-key'); if(a) a.remove();

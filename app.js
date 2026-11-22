@@ -2548,7 +2548,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.49";
+const APP_VERSION = "v3.50";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2577,7 +2577,7 @@ async function init() {
   const vi = $("#app-version-inicio"); if (vi) vi.textContent = "PROSOL Campo " + APP_VERSION;
   if ("serviceWorker" in navigator) {
     try {
-      const reg = await navigator.serviceWorker.register("service-worker.js");
+      const reg = await navigator.serviceWorker.register("service-worker.js", { updateViaCache: "none" });
       // Revisa si hay una versión nueva cada vez que se abre la app
       reg.update();
       // Cuando el nuevo service worker toma control, recarga para mostrar lo nuevo

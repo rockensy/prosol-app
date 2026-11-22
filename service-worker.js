@@ -1,20 +1,28 @@
 /* PROSOL Campo · service worker — cachea la app para uso sin internet. */
-const CACHE = "prosol-campo-v33";
+const CACHE = "prosol-campo-v34";
 const ASSETS = [
   "./index.html",
   "./style.css",
   "./app.js",
+  "./prosol_web.js",
+  "./db.js",
+  "./sync.js",
   "./envio_estado.js",
   "./seguimiento.html",
   "./seguimiento.js",
   "./lib/jszip.min.js",
+  "./lib/api.js",
+  "./lib/auth.js",
+  "./lib/wa.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // v3.50: cada archivo se pide fresco a GitHub (nunca la copia vieja del navegador)
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
 });
 
 // Permite que la app pida activar la versión nueva sin esperar
