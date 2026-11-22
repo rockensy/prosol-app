@@ -463,6 +463,20 @@ body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-
   body.modo-admin .kpis{grid-template-columns:repeat(2,1fr)}
 }
 #seg-texto{width:100%;min-height:84px}
+/* v3.49: plan B del envío con fotos, aviso de máximo y fotos del seguimiento */
+.dest-seg{margin-top:12px;border:1px solid #D6EAF8;border-radius:10px;padding:8px 10px;background:#F4F9FD}
+.dest-seg>summary{font-weight:800;color:#1B4F72;cursor:pointer}
+.dest-plan-b{background:#FFF4E5;border:1px solid #F5C77E;border-radius:10px;padding:10px;margin:8px 0;font-size:.88rem}
+.dest-plan-b p{margin:0 0 8px}
+#dest-fotos-n.err{color:#C0392B;font-weight:700}
+/* v3.49: cliente y sitio del servicio */
+.sitio-card{background:#fff;border:1px solid #E1E6EB;border-radius:12px;padding:10px 12px;margin:8px 0 6px}
+.sit-h{font-weight:800;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;color:var(--grafito);margin-bottom:4px}
+.sit-f{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #F0F2F4;font-size:.9rem;align-items:baseline}
+.sit-f:last-of-type{border-bottom:0}.sit-f b{min-width:132px;font-weight:700;color:#5D6D7E;font-size:.82rem}
+.sit-f span{flex:1;word-break:break-word}.sit-vacio{color:#AAB4BE;font-style:italic}
+.sit-b{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:8px;background:#EEF4FA;text-decoration:none;font-weight:700;color:#1B4F72;font-size:.82rem}
+.hc-sitio{font-size:.8rem;color:#5D6D7E;margin-top:4px;word-break:break-word}
 /* v3.48: fotos elegibles para el reporte por WhatsApp */
 .dest-fotos{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 2px}
 .dest-foto{position:relative;display:block;border-radius:8px;overflow:hidden;border:2px solid #E1E6EB}

@@ -431,9 +431,10 @@ function abrirEquipo(e) {
 // Lo que oficina ya cargó (_OF) prevalece y queda de solo lectura; el técnico
 // solo completa vacíos. Se guarda en equipos_campo (la nube) y, sin señal, queda en cola.
 const CAMPOS_EDIT = [
+  ["CLIENTE_TEL", "eqe-cli-tel", "cliente_tel"], ["CONTACTO", "eqe-contacto", "contacto"],
+  ["CONTACTO_TEL", "eqe-contacto-tel", "contacto_tel"], ["UBICACION", "eqe-ubic", "ubicacion"],
   ["MODELO", "eqe-modelo", "modelo"], ["POTENCIA_KW", "eqe-kw", "potencia_kw"],
-  ["VOLTAJE", "eqe-voltaje", "voltaje"], ["UBICACION", "eqe-ubic", "ubicacion"],
-  ["OBSERVACION", "eqe-obs", "observacion"],
+  ["VOLTAJE", "eqe-voltaje", "voltaje"], ["OBSERVACION", "eqe-obs", "observacion"],
 ];
 function abrirEdicionEquipo() {
   const e = estado._equipoActual; if (!e) return;
@@ -467,6 +468,16 @@ async function subirEdicionesEquipo() {
   return ok;
 }
 window._prosolSubirEdicionesEquipo = subirEdicionesEquipo;
+// v3.49: la ubicación de cada servicio queda como la ubicación vigente del equipo (siempre se actualiza)
+function registrarGpsEquipo(e, lat, lng) {
+  if (!e || !e.SERIE || isNaN(lat) || isNaN(lng)) return;
+  const f = new Date().toISOString();
+  e.GPS_LAT = lat; e.GPS_LNG = lng; e.GPS_FECHA = f;
+  const cola = leerColaEq();
+  cola[e.SERIE] = { d: Object.assign((cola[e.SERIE] || {}).d || {}, { gps_lat: lat, gps_lng: lng, gps_fecha: f }), por: estado.tecnico, id_sb: e.ID_SB || null };
+  escribirColaEq(cola);
+  subirEdicionesEquipo();
+}
 async function guardarDatosEquipo() {
   const e = estado._equipoActual; if (!e) return;
   const of = e._OF || [];
@@ -482,16 +493,17 @@ async function guardarDatosEquipo() {
   escribirColaEq(cola);
   await guardarLocal();
   $("#sheet-eq-edit").hidden = true;
-  abrirEquipo(e);
+  if (estado._eqEditDesde === "ot") { estado._eqEditDesde = null; pintarSitioOT(); } else abrirEquipo(e);
   const n = await subirEdicionesEquipo();
   toast(n ? "Datos guardados en la nube." : "Guardado en tu teléfono; se subirá cuando haya señal.", n ? "ok" : "");
 }
 
 // ---------- Geolocalización de la orden ----------
 let _ubicacionOT = null;
-function capturarUbicacion() {
+function capturarUbicacion(despues) {
+  const seguir = typeof despues === "function" ? despues : null;
   if (!("geolocation" in navigator)) {
-    toast("Tu teléfono no permite ubicación.", "err"); return;
+    toast("Tu teléfono no permite ubicación.", "err"); if (seguir) seguir(); return;
   }
   $("#ot-ubicacion").value = "Obteniendo ubicación…";
   navigator.geolocation.getCurrentPosition(
@@ -501,10 +513,12 @@ function capturarUbicacion() {
       _ubicacionOT = { lat, lon };
       $("#ot-ubicacion").value = lat + ", " + lon;
       toast("Ubicación capturada.", "ok");
+      if (seguir) seguir();
     },
     (err) => {
       $("#ot-ubicacion").value = "";
       toast("No se pudo obtener la ubicación. Activa el GPS y permite el acceso.", "err");
+      if (seguir) seguir();
     },
     { enableHighAccuracy: true, timeout: 12000 }
   );
@@ -609,7 +623,7 @@ function nuevaOT(equipo, tipo, ctx) {
   $("#ot-horas").value = "";
   $("#ot-obs").value = "";
   if ($("#ot-ubicacion")) $("#ot-ubicacion").value = "";
-  _ubicacionOT = null;
+  _ubicacionOT = null; estado._gpsPreguntado = false;
   // tipos
   const sel = $("#ot-tipo"); sel.innerHTML = "";
   (estado.catalogo?.tipos_mantenimiento || [TERMINO_PREV]).forEach(t => {
@@ -619,7 +633,7 @@ function nuevaOT(equipo, tipo, ctx) {
   pintarSelectorActividades();
   // equipo
   if (equipo && equipo.SERIE) setEquipoOT(equipo);
-  else { estado._otEquipo = null; $("#ot-serie").value = ""; $("#ot-cliente-info").textContent = ""; }
+  else { estado._otEquipo = null; $("#ot-serie").value = ""; $("#ot-cliente-info").textContent = ""; pintarSitioOT(); }
   cargarActividadesDelTipo();   // carga automática del combo seleccionado
   pintarFotos(); limpiarFirma();
   ir("nueva-ot");
@@ -677,8 +691,46 @@ function agregarActividadCatalogo(t) {
 function setEquipoOT(e) {
   estado._otEquipo = e;
   $("#ot-serie").value = e.SERIE || "";
-  const cli = clientePorId(e.ID_CLIENTE);
-  $("#ot-cliente-info").textContent = cli ? "Cliente: " + cli.RAZON_SOCIAL : "";
+  $("#ot-cliente-info").textContent = "";
+  pintarSitioOT();
+}
+// ---- v3.49: datos del cliente y del sitio del equipo (para el técnico que atiende) ----
+function sitioDe(e) {
+  const cli = clientePorId(e ? e.ID_CLIENTE : null) || {};
+  const gps = e && e.GPS_LAT != null && e.GPS_LNG != null && !isNaN(Number(e.GPS_LAT)) ? { lat: Number(e.GPS_LAT), lng: Number(e.GPS_LNG), f: e.GPS_FECHA } : null;
+  return { cliente: cli.RAZON_SOCIAL || "", cliTel: (e && e.CLIENTE_TEL) || cli.TELEFONO || "",
+    contacto: (e && e.CONTACTO) || cli.CONTACTO || "", contactoTel: (e && e.CONTACTO_TEL) || "",
+    direccion: (e && e.UBICACION) || cli.DIRECCION || "", ciudad: cli.CIUDAD || "", gps };
+}
+function botonesTel(tel) {
+  const n = numWA(tel); if (!n) return "";
+  return ` <a class="sit-b" href="tel:+${n}">📞</a><a class="sit-b" href="https://wa.me/${n}" target="_blank" rel="noopener">💬</a>`;
+}
+function sitioHTML(e, compacto) {
+  const s = sitioDe(e), sd = '<span class="sit-vacio">sin dato</span>';
+  const mapa = s.gps ? `<a class="sit-b" href="https://www.google.com/maps/dir/?api=1&destination=${s.gps.lat},${s.gps.lng}" target="_blank" rel="noopener">🧭 Cómo llegar</a>` : "";
+  if (compacto) {
+    const p = [];
+    if (s.direccion) p.push("📍 " + ESC(s.direccion)); else if (s.gps) p.push("📍 ubicación GPS registrada");
+    if (s.contacto || s.cliTel) p.push("👤 " + ESC(s.contacto || s.cliente) + botonesTel(s.contactoTel || s.cliTel));
+    return p.length || mapa ? `<div class="hc-sitio">${p.join(" · ")}${mapa ? " " + mapa : ""}</div>` : "";
+  }
+  const f = (ic, lab, val, extra) => `<div class="sit-f"><b>${ic} ${lab}</b><span>${val ? ESC(val) : sd}${extra || ""}</span></div>`;
+  return `<div class="sitio-card"><div class="sit-h">Cliente y sitio del servicio</div>
+    ${f("👤", "Cliente", s.cliente)}
+    ${f("📱", "Celular cliente", s.cliTel, botonesTel(s.cliTel))}
+    ${f("🧑‍🔧", "Contacto en sitio", s.contacto)}
+    ${f("📱", "Celular contacto", s.contactoTel, botonesTel(s.contactoTel))}
+    ${f("🏠", "Dirección del equipo", s.direccion + (s.direccion && s.ciudad ? " · " + s.ciudad : ""))}
+    <div class="sit-f"><b>📍 Ubicación GPS</b><span>${s.gps ? `${s.gps.lat.toFixed(5)}, ${s.gps.lng.toFixed(5)}${s.gps.f ? ` <small>(${ESC(fmtFecha(String(s.gps.f).slice(0, 10)))})</small>` : ""} ${mapa}` : sd + " <small>· se carga al guardar esta OT con ubicación</small>"}</span></div>
+    <button class="btn btn-ghost btn-block" id="btn-sitio-editar" style="margin-top:8px;min-height:42px">✏️ Completar datos del cliente y del sitio</button></div>`;
+}
+function pintarSitioOT() {
+  const box = $("#ot-sitio"); if (!box) return;
+  const e = estado._otEquipo;
+  box.innerHTML = e && e.SERIE ? sitioHTML(e, false) : "";
+  const b = $("#btn-sitio-editar");
+  if (b) b.onclick = () => { estado._equipoActual = e; estado._eqEditDesde = "ot"; abrirEdicionEquipo(); };
 }
 function pintarActividades() {
   const ul = $("#ot-actividades"); ul.innerHTML = "";
@@ -764,6 +816,13 @@ function guardarOT() {
   if (!e || !e.SERIE) { toast("Elige el equipo (por serie) primero.", "err"); return; }
   const numero = $("#ot-numero").value.trim();
   if (!numero) { toast("Escribe el N° de la orden física que estás usando.", "err"); return; }
+  // v3.49: la ubicación del servicio mantiene al día la del equipo; si no se capturó, se ofrece (una vez por OT)
+  if (!_ubicacionOT && !estado._gpsPreguntado && "geolocation" in navigator) {
+    estado._gpsPreguntado = true;
+    if (confirm("No capturaste la ubicación del servicio.\n\n¿Capturarla ahora? Queda como la ubicación actual de este equipo.")) {
+      capturarUbicacion(() => guardarOT()); return;
+    }
+  }
   // BLOQUEANTE: dos órdenes sin enviar con el mismo número
   if (estado.ordenes.some(o => (o.NUMERO_OT || "") === numero)) {
     toast("Ya tienes una orden con el N° " + numero + " sin enviar.", "err"); return;
@@ -841,6 +900,7 @@ function guardarOT() {
   cerrarSegPorOT(ctx, numero);
   estado._otCtx = null;
 
+  if (orden.GPS_LAT && orden.GPS_LON) registrarGpsEquipo(e, Number(orden.GPS_LAT), Number(orden.GPS_LON));
   guardarLocal(); refrescarSync();
   volver();
   abrirGuardada(copia);
@@ -1357,6 +1417,7 @@ function tarjetaHoy(it, modo) {
     <div class="hc-main">${ESC(it.cliente)}</div>
     <div class="hc-sub">Serie ${ESC(it.serie)} · ${ESC(it.equipo)}</div>
     <div class="hc-sub">${ESC(it.tipoMant)}</div>
+    ${it.e ? sitioHTML(it.e, true) : ""}
     ${s && s.motivo ? `<div class="hc-motivo">“${ESC(s.motivo)}”</div>` : ""}
     ${s && modo === "aut" ? `<div class="hc-sub">Pide: ${ESC(s.solicitante)}</div>` : ""}
     ${s && modo === "pen" ? `<div class="hc-sub">Esperando que el supervisor autorice…</div>` : ""}
@@ -1787,17 +1848,29 @@ async function abrirDestinos(o) {
   const hayFiles = o.files && o.files.length;
   (estado._destUrls || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (x) { /* nada */ } });
   estado._destUrls = hayFiles ? o.files.map(f => URL.createObjectURL(f)) : [];
-  const miniaturas = hayFiles ? `<div class="field-label" style="margin-top:4px">Fotos de la orden (marca las que van · mínimo 1)</div>
+  // WhatsApp: UN solo envío; el teléfono admite hasta MAX_FOTOS_ENVIO archivos (se marcan las primeras, con la firma)
+  const idxFirma = hayFiles ? o.files.findIndex(f => /_firma\./i.test(f.name)) : -1;
+  const marcadas = new Set(); if (idxFirma >= 0) marcadas.add(idxFirma);
+  if (hayFiles) for (let i = 0; i < o.files.length && marcadas.size < MAX_FOTOS_ENVIO; i++) marcadas.add(i);
+  const esFinal = !!(o.reg && o.reg.tipo === "FINAL" && o.h);
+  const etiq = (f, i) => /_firma\./i.test(f.name) ? "Firma" : "Foto " + (i + 1);
+  const miniaturas = hayFiles ? `<div class="field-label" style="margin-top:4px">Fotos para WhatsApp (un solo envío · mínimo 1, máximo ${MAX_FOTOS_ENVIO})</div>
     <div class="dest-fotos">${o.files.map((f, i) => `<label class="dest-foto"><img src="${estado._destUrls[i]}" alt="">
-      <input type="checkbox" class="dest-foto-chk" data-i="${i}" checked><span>${/_firma\./i.test(f.name) ? "Firma" : "Foto " + (i + 1)}</span></label>`).join("")}</div>
+      <input type="checkbox" class="dest-foto-chk" data-i="${i}" ${marcadas.has(i) ? "checked" : ""}><span>${etiq(f, i)}</span></label>`).join("")}</div>
     <p class="hint" id="dest-fotos-n" style="margin:2px 0 8px"></p>` : "";
+  const fotosSeg = esFinal ? (o.h._fotos || []) : [];
+  const miniSeg = fotosSeg.length ? `<details class="dest-seg" open><summary>🔎 Fotos para el seguimiento en línea del cliente <span id="dest-seg-n"></span></summary>
+    <p class="hint" style="margin:4px 0 6px">Confirma las que verá el cliente en su enlace (sin límite). Se publican al enviar el reporte.</p>
+    <div class="dest-fotos">${fotosSeg.map((f, i) => `<label class="dest-foto"><img src="${f.dataUrl}" alt="">
+      <input type="checkbox" class="dest-seg-chk" data-n="${ESC(f.nombre)}" ${o.h._segFotos ? (o.h._segFotos.includes(f.nombre) ? "checked" : "") : "checked"}><span>${/_firma\./i.test(f.nombre || "") ? "Firma" : "Foto " + (i + 1)}</span></label>`).join("")}</div></details>` : "";
   $("#dest-cuerpo").innerHTML = (hayFiles ? `${miniaturas}
     <button class="btn btn-primary btn-block dest-wa-libre" id="dest-con-fotos">📲 Enviar reporte con fotos por WhatsApp</button>
     <p class="hint" style="margin:6px 0 8px">Se abre WhatsApp con el reporte y las fotos marcadas: eliges el contacto o grupo y pulsas Enviar.</p>
-    <button class="btn btn-ghost btn-block" id="dest-wa-libre">📲 Abrir WhatsApp (solo texto, sin fotos)</button>`
+    <div id="dest-plan-b" class="dest-plan-b" hidden></div>
+    <button class="btn btn-ghost btn-block" id="dest-wa-libre">📲 Abrir WhatsApp (solo texto, sin fotos)</button>${miniSeg}`
     : `<button class="btn btn-primary btn-block dest-wa-libre" id="dest-wa-libre">📲 Abrir WhatsApp y elegir contactos o grupos</button>
     <p class="hint" style="margin:6px 0 4px">Se abre WhatsApp con el reporte listo: eliges el chat o grupo (ej. Servicio Técnico PROSOL S.A.) y pulsas Enviar.</p>
-    <button class="btn btn-ghost btn-block" id="dest-compartir">📤 Compartir… (eliges contactos o grupos)</button>`) + `
+    <button class="btn btn-ghost btn-block" id="dest-compartir">📤 Compartir… (eliges contactos o grupos)</button>${miniSeg}`) + `
     <details class="dest-rapida"><summary>Lista rápida (números guardados)</summary>
     <h3 class="eq-h">1 · Grupo técnico</h3>${sec(GRUPO_TECNICO, "Aún no hay contactos. Agrégalos en Inicio → Contactos WhatsApp.")}
     <h3 class="eq-h">2 · Cliente</h3>
@@ -1815,17 +1888,45 @@ async function abrirDestinos(o) {
   const sel = () => hayFiles ? $$("#dest-cuerpo .dest-foto-chk").filter(c => c.checked).map(c => o.files[Number(c.dataset.i)]) : [];
   o._sel = sel; o._selFijada = null;
   const conFotos = (fs) => textoConFotos(o.texto, fs.length, fs.some(f => /_firma\./i.test(f.name)), nTot);
+  // selección para el seguimiento del cliente (se guarda en la orden y se usa en el cierre)
+  o._selSeg = () => $$("#dest-cuerpo .dest-seg-chk").filter(c => c.checked).map(c => c.dataset.n);
+  const cuentaSeg = () => { const el = $("#dest-seg-n"); if (el) el.textContent = "(" + o._selSeg().length + " de " + fotosSeg.length + ")"; if (esFinal) o.h._segFotos = o._selSeg(); };
+  $$("#dest-cuerpo .dest-seg-chk").forEach(c => c.onchange = cuentaSeg); cuentaSeg();
   const soloTexto = () => hayFiles ? textoSinFotos(o.texto, nTot) : o.texto;
   o._textoSolo = soloTexto();
   if (hayFiles) {
-    const cuenta = () => { const n = sel().length; $("#dest-fotos-n").textContent = n + " de " + nTot + " seleccionada(s)"; $("#dest-con-fotos").disabled = n === 0; };
+    const cuenta = () => {
+      const n = sel().length;
+      $("#dest-fotos-n").textContent = n + " de " + nTot + " seleccionada(s)" + (n > MAX_FOTOS_ENVIO ? " · máximo " + MAX_FOTOS_ENVIO + " por envío: desmarca " + (n - MAX_FOTOS_ENVIO) : "") +
+        (nTot > MAX_FOTOS_ENVIO && n <= MAX_FOTOS_ENVIO ? " · todas las fotos quedan en el seguimiento del cliente" : "");
+      $("#dest-fotos-n").classList.toggle("err", n > MAX_FOTOS_ENVIO);
+      $("#dest-con-fotos").disabled = n === 0 || n > MAX_FOTOS_ENVIO;
+      $("#dest-con-fotos").textContent = "📲 Enviar reporte con " + n + " foto(s) por WhatsApp";
+    };
     $$("#dest-cuerpo .dest-foto-chk").forEach(c => c.onchange = cuenta); cuenta();
+    const listo = (fs, como) => {
+      registrarCompartido(o, como || ("WhatsApp con " + fs.length + " foto(s) (contacto o grupo elegido)"), "COMPARTIDO");
+      if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews();
+    };
     $("#dest-con-fotos").onclick = async () => {
       const fs = sel(); if (!fs.length) { toast("Marca al menos 1 foto.", "err"); return; }
-      if (await compartirNativo(conFotos(fs), fs, o.titulo)) {
-        registrarCompartido(o, "WhatsApp con " + fs.length + " foto(s) (contacto o grupo elegido)", "COMPARTIDO");
-        if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews();
-      }
+      const r = await compartirArchivos(conFotos(fs), fs, o.titulo);
+      if (r.ok) { listo(fs); return; }
+      if (r.err === "AbortError") { toast("Envío cancelado. Puedes intentarlo de nuevo.", ""); return; }
+      // plan B (el teléfono no aceptó texto + fotos juntos): copiar el reporte y compartir las fotos en un solo envío
+      const pb = $("#dest-plan-b"); pb.hidden = false;
+      pb.innerHTML = `<p><b>El teléfono no aceptó el reporte con las fotos juntos</b> (${ESC(r.motivo)}). Hazlo en dos toques:</p>
+        <button class="btn btn-ghost btn-block" id="pb-copiar">1 · 📋 Copiar el reporte</button>
+        <button class="btn btn-primary btn-block" id="pb-fotos" style="margin-top:6px">2 · 🖼️ Compartir las ${fs.length} foto(s) y pegar el reporte en el chat</button>`;
+      $("#pb-copiar").onclick = async () => {
+        try { await navigator.clipboard.writeText(conFotos(fs)); toast("Reporte copiado. Ahora comparte las fotos y pégalo en el chat.", "ok"); }
+        catch (x) { toast("No se pudo copiar automáticamente; usa «Abrir WhatsApp (solo texto)».", "err"); }
+      };
+      $("#pb-fotos").onclick = async () => {
+        const r2 = await compartirArchivos("", fs, o.titulo);
+        if (r2.ok) listo(fs, "WhatsApp: " + fs.length + " foto(s) + reporte pegado (contacto o grupo elegido)");
+        else if (r2.err !== "AbortError") toast("El teléfono tampoco aceptó las fotos (" + r2.motivo + "). Usa «Abrir WhatsApp (solo texto)» y adjunta las fotos en el chat.", "err");
+      };
     };
   } else {
     $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, [], o.titulo)) { registrarCompartido(o); if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); } };
@@ -1940,10 +2041,23 @@ function envBloqueHTML(lotes) {
 }
 // línea de fotos del reporte según lo que realmente viaja
 function textoConFotos(t, n, firma, tot) {
-  return String(t).replace(/^📷 .*$/m, "📷 " + n + " foto(s) adjunta(s)" + (firma ? " · con firma del cliente" : "") + (n < tot ? " (de " + tot + " registradas en la orden)" : ""));
+  return String(t).replace(/^📷 .*$/m, "📷 " + n + " foto(s) adjunta(s)" + (firma ? " · con firma del cliente" : "") +
+    (n < tot ? " (de " + tot + " registradas; todas en el seguimiento en línea)" : ""));
 }
 function textoSinFotos(t, tot) {
   return String(t).replace(/^📷 .*$/m, "📷 " + tot + " foto(s) registradas en la orden (no van en este mensaje)");
+}
+// v3.49: límite de archivos por envío del teléfono (Chrome/Android) y compartir con motivo claro
+const MAX_FOTOS_ENVIO = 10;
+const MOTIVO_SHARE = { NotAllowedError: "el teléfono no permitió compartir en este momento", DataError: "demasiadas fotos o archivos muy pesados",
+  TypeError: "formato no admitido", NotSupportedError: "el teléfono no admite compartir archivos desde la app" };
+async function compartirArchivos(texto, files, titulo) {
+  const d = { title: titulo || "PROSOL" }; if (texto) d.text = texto;
+  if (files && files.length) d.files = files;
+  if (!navigator.share) return { ok: false, err: "NotSupportedError", motivo: MOTIVO_SHARE.NotSupportedError };
+  if (d.files && navigator.canShare && !navigator.canShare({ files: d.files })) return { ok: false, err: "NotSupportedError", motivo: MOTIVO_SHARE.NotSupportedError };
+  try { await navigator.share(d); return { ok: true }; }
+  catch (x) { const n = (x && x.name) || "Error"; return { ok: false, err: n, motivo: MOTIVO_SHARE[n] || ((x && x.message) || n) }; }
 }
 async function compartirNativo(texto, files, titulo) {
   const d = { text: texto, title: titulo || "PROSOL" };
@@ -1951,7 +2065,10 @@ async function compartirNativo(texto, files, titulo) {
     if (navigator.canShare && navigator.canShare({ files })) d.files = files;
     else { toast("Este celular no permite adjuntar las fotos desde la app: usa «Abrir WhatsApp (solo texto)» y adjunta las fotos en el chat.", "err"); return false; }
   }
-  if (navigator.share) { try { await navigator.share(d); return true; } catch (x) { return false; } }
+  if (navigator.share) {
+    try { await navigator.share(d); return true; }
+    catch (x) { if (!(x && x.name === "AbortError")) toast("No se pudo compartir: " + (MOTIVO_SHARE[x && x.name] || (x && x.message) || "error") + ".", "err"); return false; }
+  }
   try { await navigator.clipboard.writeText(texto); toast("Mensaje copiado. Pégalo en WhatsApp.", "ok"); return true; }
   catch (x) { toast("No se pudo compartir.", "err"); return false; }
 }
@@ -2022,14 +2139,17 @@ function reducirFoto(dataUrl, max) {
   });
 }
 // cierre: el seguimiento termina con el envío del reporte final; queda como constancia (30 días)
-async function publicarCierre(h, elegidos) {
+async function publicarCierre(h, confirmadas) {
   const token = tokenDeOT(h), sg = sgDeOT(h);
-  const nombres = (elegidos || []).map(f => f.name);
-  const fotos = (h._fotos || []).filter(f => !/_firma\./i.test(f.nombre || ""));
-  const usar = (nombres.length ? fotos.filter(f => nombres.includes(f.nombre)) : fotos).slice(0, 4);
-  const firma = (h._fotos || []).find(f => /_firma\./i.test(f.nombre || ""));
+  // v3.49: todas las fotos de la orden que el técnico confirmó para el seguimiento (sin límite; por defecto todas)
+  const elegidas = Array.isArray(confirmadas) ? confirmadas : (h._segFotos || null);
+  const conf = (f) => !elegidas || elegidas.includes(f.nombre);
+  const usar = (h._fotos || []).filter(f => !/_firma\./i.test(f.nombre || "") && conf(f));
+  const firmaF = (h._fotos || []).find(f => /_firma\./i.test(f.nombre || ""));
+  const firma = firmaF && conf(firmaF) ? firmaF : null;
   const red = [];
-  for (const f of usar) { const r = await reducirFoto(f.dataUrl, 800); if (r) red.push(r); }
+  const lado = usar.length > 8 ? 720 : 800;
+  for (const f of usar) { const r = await reducirFoto(f.dataUrl, lado); if (r) red.push(r); }
   const eq = equipoTxtWA(h.SERIE);
   const base = sg ? datosSeg(sg) : { etapas: [], avances: [], etapa: "FINALIZADA" };
   const reporte = {
@@ -2164,7 +2284,7 @@ function abrirSeg(it) {
   estado._segIt = it; estado._segFiles = [];
   const key = it.k + ":" + it.id, sg = segDe(key, false) || { etapa: "PROGRAMADA", ev: [], av: [] };
   $("#seg-titulo").textContent = "Seguimiento · Serie " + it.serie;
-  $("#seg-cli").innerHTML = `<div class="row-title" style="white-space:normal">${ESC(it.cliente)}</div><div class="row-sub" style="white-space:normal">${ESC(it.equipo)} · ${ESC(it.tipoMant)}</div>`;
+  $("#seg-cli").innerHTML = `<div class="row-title" style="white-space:normal">${ESC(it.cliente)}</div><div class="row-sub" style="white-space:normal">${ESC(it.equipo)} · ${ESC(it.tipoMant)}</div>${it.e ? sitioHTML(it.e, true) : ""}`;
   const idx = ETAPAS.findIndex(e => e[0] === sg.etapa);
   $("#seg-etapas").innerHTML = ETAPAS.map((e, i) => `<button class="seg-et ${i < idx ? "hecho" : ""} ${i === idx ? "on" : ""}" data-e="${e[0]}" ${e[0] === "FINALIZADA" ? "disabled" : ""}><span>${e[2]}</span>${e[1]}</button>`).join("");
   $$("#seg-etapas .seg-et").forEach(b => b.onclick = () => {
@@ -2219,12 +2339,13 @@ function enviarOrdenConDestinos() {
   const h = estado.historial[estado._ordenHist]; if (!h) return;
   const eq = equipoPorSerie(h.SERIE), c = clientePorId(eq ? eq.ID_CLIENTE : null);
   const sg = sgDeOT(h);
-  abrirDestinos({ titulo: "Reporte final · OT " + (h.NUMERO_OT || ""), texto: reporteFinalTexto(h), files: fotosComoFiles(h),
+  abrirDestinos({ titulo: "Reporte final · OT " + (h.NUMERO_OT || ""), texto: reporteFinalTexto(h), files: fotosComoFiles(h), h: h,
     cliente: { nombre: h.RAZON_SOCIAL, tel: c ? c.TELEFONO : "" }, clienteDefault: true,
     reg: { tipo: "FINAL", key: sg ? sg.key : null, numero_ot: h.NUMERO_OT, serie: h.SERIE },
     alTerminar: function () {
       h._enviada = true; guardarLocal(); pintarHistorial();
-      publicarCierre(h, this._selFijada || (this._sel ? this._sel() : []));
+      // si la cola uno-por-uno ya reemplazó las miniaturas, vale la selección guardada en la orden (h._segFotos)
+      publicarCierre(h, this._selSeg && $$("#dest-cuerpo .dest-seg-chk").length ? this._selSeg() : null);
     } });
 }
 
@@ -2321,7 +2442,7 @@ function wire() {
   if ($("#btn-nv-crear")) $("#btn-nv-crear").onclick = crearVisitaNV;
   $$('input[name="nv-clase"]').forEach(r => r.addEventListener("change", actualizarBotonNV));
   window.addEventListener("online", () => syncSolicitudes(true));
-  if ($("#btn-ubicacion")) $("#btn-ubicacion").onclick = capturarUbicacion;
+  if ($("#btn-ubicacion")) $("#btn-ubicacion").onclick = () => capturarUbicacion();
   $("#btn-elegir-equipo").onclick = () => abrirSheetEquipo(setEquipoOT);
   if ($("#btn-qr-equipo")) $("#btn-qr-equipo").onclick = () => abrirEscanerQR(setEquipoOT);
   if ($("#sheet-qr-close")) $("#sheet-qr-close").onclick = cerrarEscanerQR;
@@ -2427,7 +2548,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.48";
+const APP_VERSION = "v3.49";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2602,6 +2723,13 @@ function initSupabase() {
       const campoPorSerie = {};
       eqCampo.forEach(c => { if (c.serie) campoPorSerie[c.serie] = c; });
       const _txt = x => x !== null && x !== undefined && String(x).trim() !== '';
+      // v3.49: celular del cliente (ficha de oficina) y última ubicación GPS de las órdenes de campo
+      const telCli = {}; cli.forEach(c => { if (_txt(c.telefono)) telCli[c.id] = c.telefono; });
+      const gpsOT = {};
+      ots.forEach(o => { if (o.serie && o.gps_lat != null && o.gps_lng != null) { const f = o.creado || o.fecha || '';
+        if (!gpsOT[o.serie] || f > gpsOT[o.serie].f) gpsOT[o.serie] = { lat: Number(o.gps_lat), lng: Number(o.gps_lng), f }; } });
+      const gpsMasNuevo = (...cs) => cs.filter(g => g && g.lat != null && g.lng != null && !isNaN(g.lat))
+        .sort((a, b) => String(b.f || '').localeCompare(String(a.f || '')))[0] || null;
       _e.catalogo.equipos = eq.map(e => {
         const ov = campoPorSerie[e.serie] || {}, OF = [];
         const elegir = (col, base, extra, num) => {
@@ -2615,7 +2743,14 @@ function initSupabase() {
         const volt = elegir('VOLTAJE', e.voltaje, ov.voltaje);
         const ubic = elegir('UBICACION', e.ubicacion, ov.ubicacion);
         const obs = elegir('OBSERVACION', e.observacion, ov.observacion);
+        const contacto = elegir('CONTACTO', e.contacto, ov.contacto);
+        const contactoTel = elegir('CONTACTO_TEL', e.contacto_tel, ov.contacto_tel);
+        const cliTel = elegir('CLIENTE_TEL', telCli[e.id_cliente], ov.cliente_tel);
+        const gps = gpsMasNuevo(e.gps_lat != null ? { lat: Number(e.gps_lat), lng: Number(e.gps_lng), f: e.gps_fecha } : null,
+          ov.gps_lat != null ? { lat: Number(ov.gps_lat), lng: Number(ov.gps_lng), f: ov.gps_fecha } : null, gpsOT[e.serie]);
         return {
+          CONTACTO: contacto, CONTACTO_TEL: contactoTel, CLIENTE_TEL: cliTel,
+          GPS_LAT: gps ? gps.lat : null, GPS_LNG: gps ? gps.lng : null, GPS_FECHA: gps ? gps.f : null,
           ID_EQUIPO: e.id_escritorio || e.id, ID_SB: e.id,
           SERIE: e.serie || '', CODIGO: e.codigo || '',
           ID_CLIENTE: e.id_cliente, MARCA: e.marca || 'GENERAC',

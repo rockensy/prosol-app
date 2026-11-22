@@ -49,7 +49,7 @@
 <!-- Barra de estado de sincronización (signature, siempre visible) -->
 <header id="syncbar" class="syncbar">
   <div class="syncbar-left">
-    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.48</span>
+    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.49</span>
   </div>
   <div class="syncbar-right">
     <button id="chip-catalogo" class="chip" data-go="oficina">
@@ -300,6 +300,7 @@
       <button class="field-btn" id="btn-qr-equipo" style="background:var(--azul)">⛶ QR</button>
     </label>
     <div class="ot-cliente" id="ot-cliente-info"></div>
+    <div id="ot-sitio"></div>
 
     <label class="field">
       <span class="field-label">Fecha</span>
@@ -495,14 +496,20 @@
       <button class="sheet-close" id="sheet-eq-edit-close">✕</button>
     </div>
     <div style="overflow:auto">
+      <label class="field"><span class="field-label">Celular del cliente</span>
+        <input id="eqe-cli-tel" type="tel" inputmode="tel" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Contacto en sitio</span>
+        <input id="eqe-contacto" type="text" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Celular del contacto</span>
+        <input id="eqe-contacto-tel" type="tel" inputmode="tel" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Dirección del equipo (sitio)</span>
+        <input id="eqe-ubic" type="text" autocomplete="off"></label>
       <label class="field"><span class="field-label">Modelo</span>
         <input id="eqe-modelo" type="text" autocomplete="off"></label>
       <label class="field"><span class="field-label">Potencia (kW)</span>
         <input id="eqe-kw" type="text" inputmode="decimal" autocomplete="off"></label>
       <label class="field"><span class="field-label">Voltaje</span>
         <input id="eqe-voltaje" type="text" autocomplete="off"></label>
-      <label class="field"><span class="field-label">Ubicación</span>
-        <input id="eqe-ubic" type="text" autocomplete="off"></label>
       <label class="field"><span class="field-label">Observación</span>
         <textarea id="eqe-obs"></textarea></label>
       <p class="hint">Los datos en gris ya los cargó oficina y no se editan aquí.
@@ -541,7 +548,7 @@
   </div>
 </div>
 
-<!-- Hoja: orden guardada (v3.48) — WhatsApp con destinatarios + envío a oficina -->
+<!-- Hoja: orden guardada (v3.49) — WhatsApp con destinatarios + envío a oficina -->
 <div class="sheet" id="sheet-guardada" hidden>
   <div class="sheet-card">
     <div class="sheet-head">
