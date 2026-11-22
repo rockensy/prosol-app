@@ -2150,6 +2150,13 @@ async function publicarCierre(h, confirmadas) {
   const red = [];
   const lado = usar.length > 8 ? 720 : 800;
   for (const f of usar) { const r = await reducirFoto(f.dataUrl, lado); if (r) red.push(r); }
+  // v3.51: las fotos del seguimiento van al almacenamiento de Supabase; en el seguimiento queda el enlace.
+  // Sin conexión al depósito, la foto se publica como antes (dentro del seguimiento) para no perderla.
+  const alAlmacen = async (dataUrl, nombre) => {
+    if (!dataUrl || typeof API === "undefined" || !API.hayNube()) return dataUrl;
+    try { return await API.subirFoto("seguimiento/" + token + "/" + nombre, dataUrl); } catch (e) { return dataUrl; }
+  };
+  for (let i = 0; i < red.length; i++) red[i] = await alAlmacen(red[i], Date.now() + "_foto_" + (i + 1) + ".jpg");
   const eq = equipoTxtWA(h.SERIE);
   const base = sg ? datosSeg(sg) : { etapas: [], avances: [], etapa: "FINALIZADA" };
   const reporte = {
@@ -2158,7 +2165,7 @@ async function publicarCierre(h, confirmadas) {
       .map(a => ({ d: a.DESCRIPCION, n: a.NIVEL })),
     observaciones: h.TRABAJO_REALIZADO || "",
     ubicacion: h.GPS_LAT && h.GPS_LON ? "https://maps.google.com/?q=" + h.GPS_LAT + "," + h.GPS_LON : null,
-    fotos: red, firma: firma ? await reducirFoto(firma.dataUrl, 500) : null
+    fotos: red, firma: firma ? await alAlmacen(await reducirFoto(firma.dataUrl, 500), Date.now() + "_firma.jpg") : null
   };
   publicarSeg(token, Object.assign(base, {
     numero_ot: h.NUMERO_OT || null, serie: h.SERIE || null, cliente_nombre: h.RAZON_SOCIAL || null, equipo_txt: eq || null,
@@ -2548,7 +2555,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.50";
+const APP_VERSION = "v3.51";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();

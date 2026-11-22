@@ -71,8 +71,13 @@
       const subidas = new Set(((await API.select('ot_fotos', { id_orden: id })) || []).map((f) => f.nombre_archivo));
       for (const f of fotos) {
         if (!f || !f.dataUrl || subidas.has(f.nombre)) continue;
+        // v3.51: la foto va al almacenamiento y en la base queda solo el enlace.
+        // Si el almacenamiento no responde, se guarda como antes (dentro de la base) para no perder la foto.
+        let enlace = f.dataUrl;
+        try { enlace = await API.subirFoto('ot/' + id + '/' + (f.nombre || ('foto_' + nFotos + '.jpg')), f.dataUrl); }
+        catch (e) { nota = (nota ? nota + '; ' : '') + 'foto ' + (f.nombre || '') + ' guardada sin almacenamiento (' + e.message + ')'; }
         await API.insert('ot_fotos', { id_orden: id, tipo: /_firma\./i.test(f.nombre || '') ? 'FIRMA' : 'EVIDENCIA',
-          nombre_archivo: f.nombre, data_url: f.dataUrl, descripcion: 'OT ' + (o.NUMERO_OT || '') });
+          nombre_archivo: f.nombre, data_url: enlace, descripcion: 'OT ' + (o.NUMERO_OT || '') });
         nFotos++;
       }
     } else if (o._fotosLiberadas) nota = (nota ? nota + '; ' : '') + 'fotos ya liberadas en el celular (más de 15 días)';

@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.50</strong>
+        <strong>Versión PROSOL v3.51</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.50';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.51';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.50</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.51</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2215,8 +2215,8 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
   });
 
   // Fotos (evidencias) — mismo formato que ya espera el escritorio al bajar
-  // OT de campo: array de {data_url, nombre_archivo, tipo} guardado en el
-  // propio registro de la orden (ot_fotos), sin depender de Storage aparte.
+  // OT de campo: array de {data_url, nombre_archivo, tipo}. v3.51: data_url es el
+  // enlace a la foto en el almacenamiento de Supabase (depósito prosol-fotos).
   const _fotosOT = [];
   function _pintarFotosOT(){
     const grid=$id('ot_fotos_grid'); if(!grid) return;
@@ -2271,6 +2271,18 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
     const eqSel=idEqSel?(eq||[]).find(e=>e.id===idEqSel):null;
     const tipoSel=$id('ot_tipo'); const tipoOpt=tipoSel&&tipoSel.options[tipoSel.selectedIndex];
     const tipoOtTexto = tipoOpt ? (tipoOpt.dataset.desc || tipoOpt.textContent.replace(/^🧩\s*/,'').trim()) : '';
+    // v3.51: las fotos van al almacenamiento de Supabase; en la orden queda solo el enlace.
+    // Si el almacenamiento no responde, la foto se guarda como antes (dentro de la orden) para no perderla.
+    const fotosGuardar=[]; let fotosSinAlm=0; const sello=Date.now();
+    for(let i=0;i<_fotosOT.length;i++){
+      const f=_fotosOT[i]; let enlace=f.dataUrl;
+      if(!API.esEnlaceFoto(f.dataUrl)){
+        try{ enlace=await API.subirFoto('ot/pc-'+(num||'sin-numero')+'/'+sello+'_'+i+'_'+(f.nombre||'foto.jpg'),f.dataUrl); }
+        catch(e){ fotosSinAlm++; }
+      }
+      fotosGuardar.push({data_url:enlace, nombre_archivo:f.nombre, tipo:'EVIDENCIA'});
+    }
+    if(fotosSinAlm) toast('⚠ '+fotosSinAlm+' foto(s) se guardaron sin almacenamiento (sin conexión al depósito); igual quedan en la orden');
     const row={
       numero_ot:num, id_equipo:idEqSel, id_cliente:$id('ot_cli').value||null,
       serie:eqSel?(eqSel.serie||''):'',
@@ -2285,7 +2297,7 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
       origen:'CAMPO', // BUGFIX: 'ESCRITORIO' hacía que bajar_ordenes_campo (que
       // filtra origen=CAMPO) nunca detectara las OT creadas desde la web —
       // el escritorio jamás las bajaba. Debe ser el mismo valor que usa móvil.
-      ot_fotos: _fotosOT.map(f=>({data_url:f.dataUrl, nombre_archivo:f.nombre, tipo:'EVIDENCIA'}))
+      ot_fotos: fotosGuardar
     };
     try{
       // Guardado resiliente: si Supabase rechaza el insert/update porque le
