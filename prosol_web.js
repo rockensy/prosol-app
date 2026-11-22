@@ -249,9 +249,10 @@ function ir(v) {
     b.classList.toggle('activo', b.dataset.v === v);
   });
   const fn = VIEWS[v]||VIEWS.dashboard;
-  fn().catch(e => {
+  const _err = e => {
     $id('main').innerHTML = '<div class="card"><p style="color:#E74C3C">❌ '+ESC(e.message)+'</p></div>';
-  });
+  };
+  try { Promise.resolve(fn()).catch(_err); } catch (e) { _err(e); }
 }
 
 /* ═══════════════════ VISTAS ════════════════════════════════════════════ */
@@ -1790,9 +1791,9 @@ VIEWS.config = async ()=>{
     <p id="cfgPlantMsg" style="font-size:12px;color:#27AE60;min-height:16px;margin-top:4px"></p>
     <hr style="margin:16px 0;border:none;border-top:1px solid #D5DBE1">
     <h3>ℹ App Móvil</h3>
-    <p style="font-size:13px">URL: <b>https://prosol-campo-tecnico.netlify.app</b></p>
+    <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.22</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.43</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');

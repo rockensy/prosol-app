@@ -1,5 +1,5 @@
 /* PROSOL Campo · service worker — cachea la app para uso sin internet. */
-const CACHE = "prosol-campo-v22";
+const CACHE = "prosol-campo-v24";
 const ASSETS = [
   "./index.html",
   "./style.css",
@@ -29,6 +29,8 @@ self.addEventListener("activate", (e) => {
 // Cache-first: la app funciona aunque no haya señal en el sitio del trabajo.
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
+  // Orígenes externos (Supabase, CDN, etc.): SIEMPRE a la red, nunca desde caché ni se guardan en caché.
+  if (url.origin !== self.location.origin) return;
   // Recepción de archivo compartido desde WhatsApp (share_target POST)
   if (e.request.method === "POST" && url.pathname.endsWith("/index.html")) {
     e.respondWith((async () => {
