@@ -49,7 +49,7 @@
 <!-- Barra de estado de sincronización (signature, siempre visible) -->
 <header id="syncbar" class="syncbar">
   <div class="syncbar-left">
-    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span>
+    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.44</span>
   </div>
   <div class="syncbar-right">
     <button id="chip-catalogo" class="chip" data-go="oficina">
@@ -102,12 +102,13 @@
         <p class="hint center" id="login-cat-info" style="margin-top:12px"></p>
       </div>
 
+      <button class="btn btn-ghost btn-block" id="btn-admin-movil" style="margin-top:14px">🔐 Acceso administrador</button>
       <p class="hint center" id="app-version-login" style="opacity:.6;margin-top:16px">Versión —</p>
     </div>
   </section>
 
-  <!-- PANTALLA: INICIO / ESTADO -->
-  <section class="screen" data-screen="oficina">
+  <!-- PANTALLA: INICIO (menú principal de módulos) -->
+  <section class="screen" data-screen="inicio">
     <div class="hero">
       <p class="hero-eyebrow">Tu jornada · <span id="hero-tecnico"></span></p>
       <h1 class="hero-num"><span id="hero-pend">0</span><small>órdenes por enviar</small></h1>
@@ -115,11 +116,38 @@
       <div class="hero-aviso" id="hero-aviso" hidden></div>
       <button class="hero-logout" id="btn-logout">Cerrar sesión</button>
     </div>
-
-    <div class="actions-grid">
-      <button class="tile tile-primary" data-go="enviar">
+    <div class="actions-grid" id="menu-modulos">
+      <button class="tile tile-primary" id="btn-nueva-ot">
+        <span class="tile-ic">＋</span><span class="tile-tx">Nueva orden</span></button>
+      <button class="tile" data-go="hoy">
+        <span class="tile-ic">📅</span><span class="tile-tx">Hoy</span>
+        <span class="tile-badge" id="badge-hoy">0</span></button>
+      <button class="tile" data-go="programaciones">
+        <span class="tile-ic">🗓️</span><span class="tile-tx">Programadas</span>
+        <span class="tile-badge" id="badge-prog">0</span></button>
+      <button class="tile" data-go="equipos">
+        <span class="tile-ic">🔧</span><span class="tile-tx">Equipos</span></button>
+      <button class="tile" data-go="clientes">
+        <span class="tile-ic">👥</span><span class="tile-tx">Clientes</span></button>
+      <button class="tile" data-go="historial">
+        <span class="tile-ic">🗂️</span><span class="tile-tx">Mis órdenes</span>
+        <span class="tile-badge" id="badge-hist" style="background:var(--azul)">0</span></button>
+      <button class="tile" data-go="enviar">
         <span class="tile-ic">📤</span><span class="tile-tx">Enviar a oficina</span>
         <span class="tile-badge" id="badge-pend">0</span></button>
+      <button class="tile" data-go="contactos">
+        <span class="tile-ic">📇</span><span class="tile-tx">Contactos WhatsApp</span></button>
+      <button class="tile" data-go="oficina">
+        <span class="tile-ic">🔄</span><span class="tile-tx">Sincronizar catálogo</span></button>
+    </div>
+    <p class="hint center" id="app-version-inicio" style="opacity:.7;margin-top:6px"></p>
+  </section>
+
+  <!-- PANTALLA: SINCRONIZACIÓN (catálogo + estado de envío) -->
+  <section class="screen" data-screen="oficina">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Sincronización</h1>
     </div>
 
     <div class="card" id="envio-estado" hidden>
@@ -383,15 +411,55 @@
       Las fotos se conservan ~15 días para no llenar tu celular; los datos se guardan siempre.</p>
   </section>
 
+  <!-- PANTALLA: CLIENTES (M9-C) -->
+  <section class="screen" data-screen="clientes">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Clientes</h1>
+    </div>
+    <div class="searchbar">
+      <input id="buscar-cliente" type="search" placeholder="Nombre, identificación, teléfono o ciudad">
+    </div>
+    <p class="list-count" id="clientes-count"></p>
+    <ul class="list" id="lista-clientes"></ul>
+  </section>
+
+  <section class="screen" data-screen="cliente-detalle">
+    <div class="screen-head">
+      <button class="back" data-go="clientes">‹</button>
+      <h1 id="cli-titulo">Cliente</h1>
+    </div>
+    <div class="card" id="cli-datos"></div>
+    <h2 class="section-h">Equipos del cliente</h2>
+    <ul class="list" id="cli-equipos"></ul>
+    <h2 class="section-h">Programadas pendientes</h2>
+    <ul class="list" id="cli-prog"></ul>
+    <h2 class="section-h">Últimas visitas</h2>
+    <ul class="timeline" id="cli-historial"></ul>
+  </section>
+
+  <!-- PANTALLA: CONTACTOS WHATSAPP (M9-C) -->
+  <section class="screen" data-screen="contactos">
+    <div class="screen-head">
+      <button class="back" data-go="inicio">‹</button>
+      <h1>Contactos WhatsApp</h1>
+    </div>
+    <p class="hint">Aquí se arma la lista de destinatarios de los avisos y reportes. Supervisor y técnicos
+      vienen de oficina; el resto lo completas tú y lo ven todos.</p>
+    <div id="contactos-lista"></div>
+    <button class="btn btn-primary btn-block" id="btn-contacto-nuevo" style="margin-top:12px">＋ Agregar contacto</button>
+  </section>
+
 </main>
 
 <!-- Barra inferior (M9-B) -->
 <button id="fab-visita" class="fab" hidden>＋ Visita no programada / urgente</button>
 <nav id="tabbar" class="tabbar" hidden>
+  <button data-go="inicio" data-tab="inicio"><span class="tb-ic">🏠</span><span>Inicio</span></button>
   <button data-go="hoy" data-tab="hoy"><span class="tb-ic">📅</span><span>Hoy</span><i id="tab-badge-hoy" hidden>0</i></button>
   <button data-go="equipos" data-tab="equipos"><span class="tb-ic">🔧</span><span>Equipos</span></button>
-  <button data-go="historial" data-tab="historial"><span class="tb-ic">🗂️</span><span>Mis órdenes</span></button>
-  <button data-go="oficina" data-tab="oficina"><span class="tb-ic">📤</span><span>Oficina</span><i id="tab-badge-oficina" hidden>0</i></button>
+  <button data-go="clientes" data-tab="clientes"><span class="tb-ic">👥</span><span>Clientes</span></button>
+  <button data-go="historial" data-tab="historial"><span class="tb-ic">🗂️</span><span>Órdenes</span><i id="tab-badge-oficina" hidden>0</i></button>
 </nav>
 
 <!-- Hoja modal: detalle de orden del historial -->
@@ -447,6 +515,82 @@
       <input id="sheet-buscar" type="search" placeholder="Serie, cliente o modelo">
     </div>
     <ul class="list sheet-list" id="sheet-lista"></ul>
+  </div>
+</div>
+
+<!-- Hoja: resumen de Hoy flotante al iniciar (M9-C) -->
+<div class="sheet" id="sheet-hoy-flot" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>📅 Hoy · <span id="hf-fecha"></span></h2>
+      <button class="sheet-close" id="hf-cerrar">✕</button>
+    </div>
+    <div id="hf-cuerpo" style="overflow:auto"></div>
+    <div class="sticky-foot two" style="position:static;background:transparent;border:0;padding:10px 0 0">
+      <button class="btn btn-ghost" id="hf-cerrar2">Cerrar</button>
+      <button class="btn btn-primary" id="hf-ir">Ver agenda</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hoja: seguimiento de la visita (M9-C) -->
+<div class="sheet" id="sheet-seg" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="seg-titulo">Seguimiento</h2>
+      <button class="sheet-close" id="seg-cerrar">✕</button>
+    </div>
+    <div style="overflow:auto">
+      <div class="seg-cli" id="seg-cli"></div>
+      <div class="field-label">Etapa de la visita</div>
+      <div class="seg-etapas" id="seg-etapas"></div>
+      <button class="btn btn-ghost btn-block" id="seg-avisar" style="margin-top:8px">📲 Avisar esta etapa por WhatsApp</button>
+      <div class="field-label" style="margin-top:14px">Avance parcial (presuntivo)</div>
+      <textarea id="seg-texto" placeholder="Qué encontraste / qué se está haciendo. Se informa como PARCIAL PRESUNTIVO."></textarea>
+      <label class="btn btn-ghost btn-block" style="margin-top:8px">📷 Agregar foto o video
+        <input id="seg-archivos" type="file" accept="image/*,video/*" multiple hidden></label>
+      <p class="hint" id="seg-archivos-info"></p>
+      <button class="btn btn-primary btn-block" id="seg-informar">Informar avance parcial</button>
+      <div class="field-label" style="margin-top:14px">Registro de la visita</div>
+      <ul class="timeline" id="seg-log"></ul>
+    </div>
+    <button class="btn btn-primary btn-block" id="seg-atender" style="margin-top:10px">Llenar la orden (OT)</button>
+  </div>
+</div>
+
+<!-- Hoja: destinatarios WhatsApp por categorías (M9-C) -->
+<div class="sheet" id="sheet-dest" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="dest-titulo">Enviar por WhatsApp</h2>
+      <button class="sheet-close" id="dest-cerrar">✕</button>
+    </div>
+    <div id="dest-cuerpo" style="overflow:auto"></div>
+    <div id="dest-pie" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- Hoja: editar contacto (M9-C) -->
+<div class="sheet" id="sheet-contacto" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="ct-titulo">Contacto</h2>
+      <button class="sheet-close" id="ct-cerrar">✕</button>
+    </div>
+    <div style="overflow:auto">
+      <label class="field"><span class="field-label">Categoría</span>
+        <select id="ct-cat">
+          <option value="COMERCIAL">Área comercial</option><option value="TECNICA">Área técnica</option>
+          <option value="SUPERVISOR">Supervisor</option><option value="TECNICO">Técnico</option>
+          <option value="GERENTE">Gerente</option><option value="DUENO">Dueño de la compañía</option>
+          <option value="ADICIONAL">Adicional</option></select></label>
+      <label class="field"><span class="field-label">Nombre</span><input id="ct-nombre" type="text" autocomplete="off"></label>
+      <label class="field"><span class="field-label">Teléfono (WhatsApp)</span><input id="ct-tel" type="tel" inputmode="tel" autocomplete="off" placeholder="0991234567"></label>
+    </div>
+    <div class="sticky-foot two" style="position:static;background:transparent;border:0;padding:10px 0 0">
+      <button class="btn btn-ghost" id="ct-quitar">Quitar</button>
+      <button class="btn btn-primary" id="ct-guardar">Guardar</button>
+    </div>
   </div>
 </div>
 

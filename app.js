@@ -26,6 +26,10 @@ const estado = {
   fotos: [],
   actividades: [],
   solicitudes: [],       // M9-B: visitas no programadas / urgentes
+  seguim: {},            // M9-C: etapas y avances por visita
+  avQ: [],               // M9-C: avances pendientes de subir
+  contactos: [],         // M9-C: contactos WhatsApp de la nube
+  _pila: [], _pantalla: "login",
 };
 // Exponer estado y guardarLocal globalmente para que initSupabase (fuera de IIFE) pueda accederlos
 window._prosolEstado = estado;
@@ -67,7 +71,10 @@ async function guardarLocal() {
   await DB.set("tecnico", estado.tecnico);
   await DB.set("catalogo", estado.catalogo);
   await DB.set("solicitudes", estado.solicitudes);
+  await DB.set("contactos_wa", estado.contactos || []);
   if (estado.tecnico) {
+    await DB.set("seguim::" + estado.tecnico, estado.seguim || {});
+    await DB.set("avq::" + estado.tecnico, estado.avQ || []);
     await DB.set("ordenes::" + estado.tecnico, estado.ordenes);
     await DB.set("envios::" + estado.tecnico, estado.envios);
     await DB.set("historial::" + estado.tecnico, estado.historial);
@@ -77,7 +84,10 @@ async function cargarLocal() {
   estado.tecnico = (await DB.get("tecnico")) || "";
   estado.catalogo = (await DB.get("catalogo")) || null;
   estado.solicitudes = (await DB.get("solicitudes")) || [];
+  estado.contactos = (await DB.get("contactos_wa")) || [];
   const t = estado.tecnico;
+  estado.seguim = t ? ((await DB.get("seguim::" + t)) || {}) : [];
+  estado.avQ = t ? ((await DB.get("avq::" + t)) || []) : [];
   estado.ordenes = t ? ((await DB.get("ordenes::" + t)) || []) : [];
   estado.envios = t ? ((await DB.get("envios::" + t)) || []) : [];
   estado.historial = t ? ((await DB.get("historial::" + t)) || []) : [];
@@ -106,6 +116,7 @@ async function cerrarSesion() {
   }
   await DB.set("tecnico", "");
   estado.tecnico = ""; estado.ordenes = []; estado.envios = []; estado.historial = [];
+  estado.seguim = {}; estado.avQ = []; estado._hfVisto = false;
   refrescarSync();
   pintarLogin();
   ir("login");
@@ -135,9 +146,16 @@ function toast(msg, tipo = "") {
 // ---------- Navegación ----------
 // Pestañas inferiores: pantallas que cuelgan de cada una. Sin barra en login, nueva-ot,
 // equipo-detalle y nueva-visita (tienen su propio pie con botones).
-const TAB_DE = { hoy: "hoy", programaciones: "hoy", equipos: "equipos", historial: "historial", oficina: "oficina", enviar: "oficina" };
-function ir(nombre) {
-  if (nombre === "inicio") nombre = "hoy";
+const TAB_DE = { inicio: "inicio", oficina: "inicio", enviar: "inicio", contactos: "inicio", programaciones: "hoy", hoy: "hoy",
+  equipos: "equipos", clientes: "clientes", historial: "historial" };
+const RAICES = ["inicio", "hoy", "equipos", "clientes", "historial"];
+function ir(nombre, porAtras) {
+  estado._pantalla = nombre;
+  if (!porAtras) {                       // pila propia: el botón Atrás del celular la recorre
+    if (nombre === "login" || nombre === "inicio") estado._pila = [nombre];
+    else if (RAICES.includes(nombre)) estado._pila = ["inicio", nombre];
+    else { const p = estado._pila = estado._pila || []; if (p[p.length - 1] !== nombre) p.push(nombre); }
+  }
   $$(".screen").forEach(s => s.classList.toggle("active", s.dataset.screen === nombre));
   window.scrollTo(0, 0);
   const tb = $("#tabbar");
@@ -147,10 +165,12 @@ function ir(nombre) {
   }
   const fab = $("#fab-visita"); if (fab) fab.hidden = !(nombre === "hoy" && estado.catalogo);
   if (nombre === "equipos") pintarEquipos();
+  if (nombre === "clientes") pintarClientes();
+  if (nombre === "contactos") { pintarContactos(); syncContactos(); }
   if (nombre === "programaciones") pintarProgramaciones();
   if (nombre === "enviar") pintarPendientes();
   if (nombre === "historial") pintarHistorial();
-  if (nombre === "oficina") pintarInicio();
+  if (nombre === "oficina" || nombre === "inicio") pintarInicio();
   if (nombre === "hoy") { pintarHoy(); syncSolicitudes(); }
 }
 
@@ -173,7 +193,9 @@ function refrescarSync() {
     let c = 0;
     if (cat && estado.tecnico) { const a = agendaHoy(); c = esSup() ? a.porAutorizar.length + a.urgentes.length : a.urgentes.length + a.hoy.length; }
     tbH.textContent = c; tbH.hidden = !c;
+    set("badge-hoy", c);
   }
+  set("badge-prog", (cat?.programaciones || []).filter(p => (p.ESTADO || "PROGRAMADA").toUpperCase() === "PROGRAMADA").length);
 }
 
 function pintarInicio() {
@@ -762,11 +784,12 @@ function guardarOT() {
     ctx.sol._patch = Object.assign(ctx.sol._patch || {}, { atendida: true, numero_ot: numero });
     syncSolicitudes(true);
   }
+  cerrarSegPorOT(ctx, numero);
   estado._otCtx = null;
 
   guardarLocal(); refrescarSync();
   toast("Orden guardada. Queda lista para enviar.", "ok");
-  ir("inicio");
+  volver();
 }
 
 // Marca como EJECUTADA la visita programada del equipo en Supabase y la retira del catálogo local
@@ -1210,10 +1233,10 @@ function tarjetaHoy(it, modo) {
   const acc = [];
   if (modo === "aut") acc.push('<button class="btn btn-primary" data-acc="autorizar">✔ Autorizar</button>', '<button class="btn btn-ghost" data-acc="rechazar">✕ Rechazar</button>');
   else if (modo === "rech") acc.push('<button class="btn btn-ghost" data-acc="entendido">Entendido</button>');
-  else if (modo !== "pen") acc.push('<button class="btn btn-primary" data-acc="atender">Atender</button>');
+  else if (modo !== "pen") acc.push('<button class="btn btn-primary" data-acc="atender">Atender</button>', '<button class="btn btn-ghost" data-acc="seguir">Seguimiento</button>');
   const fecha = it.fecha ? fmtFecha(it.fecha) : "Sin fecha";
   return `<div class="hcard ${modo}" data-k="${it.k}" data-id="${ESC(it.id)}">
-    <div class="hc-top"><span class="hc-fecha">${ESC(fecha)}</span>${badgesTarjeta(it, yo)}</div>
+    <div class="hc-top"><span class="hc-fecha">${ESC(fecha)}</span>${badgesTarjeta(it, yo)}${(() => { const sg = (estado.seguim || {})[it.k + ":" + it.id]; return sg && sg.etapa !== "PROGRAMADA" ? '<span class="hb et">' + etapaTxt(sg.etapa) + "</span>" : ""; })()}</div>
     <div class="hc-main">${ESC(it.cliente)}</div>
     <div class="hc-sub">Serie ${ESC(it.serie)} · ${ESC(it.equipo)}</div>
     <div class="hc-sub">${ESC(it.tipoMant)}</div>
@@ -1228,7 +1251,7 @@ function pintarHoy() {
   $("#hoy-fecha").textContent = fmtFecha(hoyISO());
   $("#fab-visita").hidden = !estado.catalogo;
   if (!estado.catalogo) {
-    cont.innerHTML = `<p class="hint">Carga el catálogo en la pestaña <b>Oficina</b> para ver tu agenda.</p>`; return;
+    cont.innerHTML = `<p class="hint">Carga el catálogo desde <b>Inicio → Sincronizar catálogo</b> para ver tu agenda.</p>`; return;
   }
   baselineVistos();
   const a = agendaHoy();
@@ -1251,21 +1274,12 @@ async function accionHoy(ev) {
   const btn = ev.target.closest("[data-acc]"); if (!btn) return;
   const card = btn.closest(".hcard"); if (!card) return;
   const acc = btn.dataset.acc, k = card.dataset.k, id = card.dataset.id;
-  if (k === "PROG") {
-    const p = (estado.catalogo?.programaciones || []).find(x => String(x.ID_VISITA || x.ID_SB) === id); if (!p) return;
-    marcarVisto(id);
-    const d = datosTarjeta(p.SERIE, p.ID_CLIENTE);
-    nuevaOT(d.e || { SERIE: p.SERIE, ID_CLIENTE: p.ID_CLIENTE }, p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: p });
-    return;
-  }
-  const s = (estado.solicitudes || []).find(x => String(x.id) === id); if (!s) return;
+  const it = itemDeTarjeta(k, id); if (!it) return;
+  if (acc === "atender") { atenderItem(it); return; }
+  if (acc === "seguir") { marcarVisto(id); abrirSeg(it); return; }
+  const s = it.s; if (!s) return;
   if (acc === "autorizar" || acc === "rechazar") { await resolverSolicitud(s, acc === "autorizar" ? "AUTORIZADA" : "RECHAZADA"); return; }
   if (acc === "entendido") { const v = leerVistos(); v.rech = v.rech || {}; v.rech[s.id] = 1; guardarVistos(v); pintarHoy(); return; }
-  if (acc === "atender") {
-    marcarVisto(s.id);
-    const d = datosTarjeta(s.serie, s.id_cliente, s.cliente_nombre);
-    nuevaOT(d.e || { SERIE: s.serie, ID_CLIENTE: s.id_cliente }, s.tipo_mantenimiento, { clase: s.clase, sol: s });
-  }
 }
 
 // ---- Solicitudes: subir pendientes y bajar las de la nube ----
@@ -1286,7 +1300,7 @@ async function syncSolicitudes(forzar) {
             fecha_resolucion: s.fecha_resolucion || null, atendida: !!s.atendida, numero_ot: s.numero_ot || null };
           const r = await API.insert("solicitudes_ot", fila);
           if (r && r.id) {
-            s.id = r.id; delete s._nuevo;
+            migrarSeg("SOL:" + s.id, "SOL:" + r.id); s.id = r.id; delete s._nuevo;
             // lo que cambió mientras se enviaba (p. ej. "atendida") se manda como corrección
             const dif = {};
             ["estado", "autorizado_por", "fecha_resolucion", "numero_ot"].forEach(k => { if ((s[k] ?? null) !== (fila[k] ?? null)) dif[k] = s[k] ?? null; });
@@ -1408,12 +1422,455 @@ function autoActualizarCatalogo() {
   });
 }
 
+// ══════════ M9-C (v3.44): Atrás del celular, menú, Hoy flotante, Clientes, seguimiento y WhatsApp por categorías ══════════
+// ---- Botón Atrás del celular: navega dentro de la app, no la cierra ----
+function volver() {
+  const p = estado._pila || [];
+  if (p.length > 1) { p.pop(); ir(p[p.length - 1], true); } else ir("inicio");
+}
+function cerrarHoja(h) { if (h.id === "sheet-qr") cerrarEscanerQR(); else h.hidden = true; }
+function atras() {
+  const abierta = $$(".sheet").filter(s => !s.hidden).pop();
+  if (abierta) { cerrarHoja(abierta); return ""; }
+  if (estado._pantalla === "nueva-ot") { $("#btn-cancelar-ot").click(); return ""; }   // pide confirmación si hay datos
+  const p = estado._pila || [];
+  if (p.length > 1) { p.pop(); ir(p[p.length - 1], true); return ""; }
+  return "salir?";
+}
+let _ultAtras = 0;
+function instalarAtras() {
+  try { history.replaceState({ g: 0 }, ""); history.pushState({ g: 1 }, ""); } catch (x) { return; }
+  window.addEventListener("popstate", () => {
+    if (document.body.classList.contains("modo-admin")) {     // vista de escritorio dentro del móvil
+      const m = document.getElementById("_modal_web");
+      if (m && !m.classList.contains("oculto")) m.classList.add("oculto");
+      else toast("Usa «Salir» para volver al modo campo.");
+      try { history.pushState({ g: 1 }, ""); } catch (x) { /* nada */ }
+      return;
+    }
+    if (atras() === "salir?") {
+      if (Date.now() - _ultAtras < 2200) { history.back(); return; }   // segundo Atrás seguido: sale
+      _ultAtras = Date.now(); toast("Presiona Atrás otra vez para salir de la app.");
+    }
+    try { history.pushState({ g: 1 }, ""); } catch (x) { /* nada */ }
+  });
+}
+
+// ---- Hoy como aviso flotante al iniciar (se puede cerrar) ----
+function mostrarHoyFlotante() {
+  if (estado._hfVisto || !estado.tecnico || !estado.catalogo) return;
+  estado._hfVisto = true;
+  const a = agendaHoy();
+  const filas = [];
+  const add = (txt, n, cls) => { if (n) filas.push(`<div class="hf-fila ${cls}"><b>${n}</b> ${txt}</div>`); };
+  add("por autorizar", a.porAutorizar.length, "aut"); add("urgentes", a.urgentes.length, "urg");
+  add("para hoy", a.hoy.length, ""); add("vencidas", a.vencidas.length, "venc"); add("próximas", a.proximas.length, "");
+  if (!filas.length) return;
+  const top = [].concat(a.urgentes, a.porAutorizar, a.hoy, a.vencidas).slice(0, 4).map(i =>
+    `<div class="hf-item"><b>${ESC(i.cliente)}</b><span>Serie ${ESC(i.serie)} · ${ESC(i.tipoMant)}</span></div>`).join("");
+  $("#hf-fecha").textContent = fmtFecha(hoyISO());
+  $("#hf-cuerpo").innerHTML = `<div class="hf-resumen">${filas.join("")}</div>${top}`;
+  $("#sheet-hoy-flot").hidden = false;
+}
+
+// ---- Clientes ----
+let _idxEqCli = { ref: null, map: null };
+function equiposDeCliente(c) {
+  const arr = estado.catalogo?.equipos || [];
+  if (_idxEqCli.ref !== arr) {
+    const m = new Map();
+    arr.forEach(e => { if (!m.has(e.ID_CLIENTE)) m.set(e.ID_CLIENTE, []); m.get(e.ID_CLIENTE).push(e); });
+    _idxEqCli = { ref: arr, map: m };
+  }
+  const r = [];
+  [c.ID_CLIENTE, c.ID_SB].forEach(k => { if (k && _idxEqCli.map.has(k)) r.push(..._idxEqCli.map.get(k)); });
+  return r;
+}
+function pintarClientes() {
+  const ul = $("#lista-clientes"); ul.innerHTML = "";
+  const q = ($("#buscar-cliente").value || "").trim().toLowerCase();
+  let arr = estado.catalogo?.clientes || [];
+  if (q) arr = arr.filter(c => [c.RAZON_SOCIAL, c.IDENTIFICACION, c.TELEFONO, c.CIUDAD, c.CONTACTO, c.ZONA].filter(Boolean).join(" ").toLowerCase().includes(q));
+  arr = arr.slice().sort((a, b) => (a.RAZON_SOCIAL || "").localeCompare(b.RAZON_SOCIAL || ""));
+  const LIM = 200;
+  $("#clientes-count").textContent = !estado.catalogo ? "Carga el catálogo para ver los clientes."
+    : arr.length > LIM ? `${arr.length} cliente(s) · se muestran ${LIM}, afina la búsqueda` : `${arr.length} cliente(s)`;
+  arr.slice(0, LIM).forEach(c => {
+    const n = equiposDeCliente(c).length;
+    const li = document.createElement("li"); li.className = "row";
+    li.innerHTML = `<div class="row-main"><div class="row-title">${ESC(c.RAZON_SOCIAL) || "—"}</div>
+      <div class="row-sub">${ESC([c.CIUDAD, c.TELEFONO].filter(Boolean).join(" · ")) || "Sin datos de contacto"}</div></div>
+      <span class="row-tag" style="background:#E8EEF3;color:var(--grafito)">${n} eq.</span><span class="row-chev">›</span>`;
+    li.onclick = () => abrirCliente(c);
+    ul.appendChild(li);
+  });
+}
+function abrirCliente(c) {
+  estado._clienteActual = c;
+  $("#cli-titulo").textContent = c.RAZON_SOCIAL || "Cliente";
+  const tel = (c.TELEFONO || "").replace(/[^\d+]/g, ""), wa = numWA(c.TELEFONO);
+  const dirTxt = [c.DIRECCION, c.CIUDAD].filter(Boolean).join(", ");
+  const mapa = dirTxt ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(dirTxt) : "";
+  const eqs = equiposDeCliente(c);
+  const series = new Set(eqs.map(e => e.SERIE));
+  const hist = [];
+  series.forEach(s => historialDeSerie(s).forEach(o => hist.push(o)));
+  hist.sort((a, b) => (b.FECHA || "").localeCompare(a.FECHA || ""));
+  $("#cli-datos").innerHTML = `
+    <div class="row-title" style="white-space:normal">${ESC(c.RAZON_SOCIAL) || "—"}</div>
+    <div class="eq-acciones" style="margin-top:10px">
+      ${tel ? `<a class="btn btn-ghost" href="tel:${ESC(tel)}">📞 Llamar</a>` : ""}
+      ${wa ? `<a class="btn btn-ghost" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 WhatsApp</a>` : ""}
+    </div>
+    <div class="eq-acciones">
+      ${c.EMAIL ? `<a class="btn btn-ghost" href="mailto:${ESC(c.EMAIL)}">✉ Correo</a>` : ""}
+      ${mapa ? `<a class="btn btn-ghost" href="${ESC(mapa)}" target="_blank" rel="noopener">🧭 Cómo llegar</a>` : ""}
+    </div>
+    <h3 class="eq-h">Resumen</h3>
+    <div class="eq-grid">
+      ${filaDato("Equipos", eqs.length)}
+      ${filaDato("Visitas registradas", hist.length)}
+      ${filaDato("Última visita", hist[0] ? fmtFecha(hist[0].FECHA) + " · OT " + (hist[0].NUMERO_OT || "—") : "")}
+      ${filaDato("Último trabajo", hist[0] ? hist[0].TIPO_OT : "")}
+    </div>
+    <h3 class="eq-h">Datos del cliente</h3>
+    <div class="eq-grid">
+      ${filaDato("Razón social", c.RAZON_SOCIAL)}
+      ${filaDato("Identificación", c.IDENTIFICACION)}
+      ${filaDato("Contacto", c.CONTACTO)}
+      ${filaDato("Teléfono", c.TELEFONO)}
+      ${filaDato("Correo", c.EMAIL)}
+      ${filaDato("Ciudad", c.CIUDAD)}
+      ${filaDato("Zona", c.ZONA)}
+      ${filaDato("Dirección", c.DIRECCION)}
+      ${filaDato("Código oficina", c.ID_CLIENTE)}
+    </div>`;
+  const ule = $("#cli-equipos"); ule.innerHTML = "";
+  if (!eqs.length) ule.innerHTML = `<li class="hint">Sin equipos registrados.</li>`;
+  eqs.forEach(e => {
+    const r = resumenEquipo(e);
+    const li = document.createElement("li"); li.className = "row";
+    li.innerHTML = `<div class="row-main"><div class="row-title">Serie ${ESC(e.SERIE)}</div>
+      <div class="row-sub">${ESC(tituloEquipo(e))}${r.ult ? " · últ. " + fmtFecha(r.ult.FECHA) : ""}</div></div><span class="row-chev">›</span>`;
+    li.onclick = () => abrirEquipo(e);
+    ule.appendChild(li);
+  });
+  const ulp = $("#cli-prog"); ulp.innerHTML = "";
+  const progs = (estado.catalogo?.programaciones || []).filter(p => (p.ESTADO || "PROGRAMADA").toUpperCase() === "PROGRAMADA" && (series.has(p.SERIE) || p.ID_CLIENTE === c.ID_CLIENTE || p.ID_CLIENTE === c.ID_SB));
+  if (!progs.length) ulp.innerHTML = `<li class="hint">Sin visitas programadas.</li>`;
+  progs.forEach(p => {
+    const li = document.createElement("li"); li.className = "row";
+    li.innerHTML = `<div class="row-main"><div class="row-title">${fmtFecha(p.FECHA_PROGRAMADA)} · ${ESC(p.TIPO_MANTENIMIENTO || "Mantenimiento")}</div>
+      <div class="row-sub">Serie ${ESC(p.SERIE)}</div></div>`;
+    ulp.appendChild(li);
+  });
+  const ulh = $("#cli-historial"); ulh.innerHTML = "";
+  if (!hist.length) ulh.innerHTML = `<li class="hint">Sin trabajos registrados.</li>`;
+  hist.slice(0, 15).forEach(o => {
+    const li = document.createElement("li"); li.className = "tl-item";
+    const hrs = Number(o.HORAS_MAQUINA) > 0 ? " · " + Number(o.HORAS_MAQUINA) + " h" : "";
+    li.innerHTML = `<div class="tl-date">${fmtFecha(o.FECHA)} · OT ${ESC(o.NUMERO_OT) || "—"} · serie ${ESC(o.SERIE)}</div>
+      <div class="tl-meta">${ESC(o.TIPO_OT)} · ${ESC(o.ESTADO)}${hrs}</div>`;
+    ulh.appendChild(li);
+  });
+  ir("cliente-detalle");
+}
+
+// ---- Contactos WhatsApp por categorías ----
+const CATS = [["COMERCIAL", "Área comercial"], ["TECNICA", "Área técnica"], ["SUPERVISOR", "Supervisor"], ["TECNICO", "Técnicos"], ["GERENTE", "Gerente"], ["DUENO", "Dueño de la compañía"], ["ADICIONAL", "Adicionales"]];
+const GRUPO_TECNICO = ["COMERCIAL", "TECNICA", "SUPERVISOR", "TECNICO", "GERENTE", "DUENO"];
+function contactosOficina() {
+  return (estado.catalogo?.tecnicos || []).map(t => ({
+    id: "of:" + (t.ID_SB || t.ID_TECNICO), cat: /SUPERVISOR/i.test(t.ESPECIALIDAD || "") ? "SUPERVISOR" : "TECNICO",
+    nombre: nombreTecnico(t), tel: numWA(t.TELEFONO), origen: "oficina" })).filter(c => c.tel);
+}
+function contactosTodos() {
+  const r = contactosOficina();
+  (estado.contactos || []).filter(c => c.activo !== false).forEach(c => {
+    const tel = numWA(c.telefono);
+    if (tel && !r.some(x => x.cat === c.categoria && x.tel === tel))
+      r.push({ id: c.id, cat: c.categoria, nombre: c.nombre, tel, origen: "nube", ref: c });
+  });
+  return r;
+}
+async function guardarContactos() { await DB.set("contactos_wa", estado.contactos || []); }
+let _ctSyncTs = 0, _ctBusy = false;
+async function syncContactos(forzar) {
+  if (typeof API === "undefined" || !API.hayNube() || !navigator.onLine || _ctBusy) return;
+  if (!forzar && Date.now() - _ctSyncTs < 30000) return;
+  _ctBusy = true;
+  try {
+    for (const c of estado.contactos || []) {
+      try {
+        if (c._nuevo) {
+          const r = await API.insert("contactos_wa", { categoria: c.categoria, nombre: c.nombre, telefono: c.telefono, activo: c.activo !== false, creado_por: c.creado_por || estado.tecnico });
+          if (r && r.id) { c.id = r.id; delete c._nuevo; if (c._patch) { /* cambios hechos durante el envío */ } }
+        } else if (c._patch && UUID_RE.test(String(c.id))) { await API.update("contactos_wa", c.id, c._patch); delete c._patch; }
+      } catch (x) { /* queda pendiente */ }
+    }
+    const remoto = await API.select("contactos_wa");
+    if (Array.isArray(remoto)) {
+      const pend = (estado.contactos || []).filter(c => c._nuevo || c._patch);
+      estado.contactos = remoto.map(r => pend.find(p => p.id === r.id) || r).concat(pend.filter(p => p._nuevo));
+      _ctSyncTs = Date.now();
+    }
+    await guardarContactos();
+  } catch (x) { /* sin red */ } finally { _ctBusy = false; }
+  if ($("#contactos-lista") && estado._pantalla === "contactos") pintarContactos();
+}
+function pintarContactos() {
+  const cont = $("#contactos-lista"); const todos = contactosTodos();
+  cont.innerHTML = CATS.map(([cat, nom]) => {
+    const l = todos.filter(c => c.cat === cat);
+    return `<h2 class="hoy-h">${nom} <span>${l.length}</span></h2>` + (l.length ? l.map(c => `
+      <div class="row ct-row" data-id="${ESC(c.id)}"><div class="row-main"><div class="row-title">${ESC(c.nombre)}</div>
+      <div class="row-sub">+${ESC(c.tel)}${c.origen === "oficina" ? " · de oficina" : ""}</div></div>
+      ${c.origen === "nube" ? '<span class="row-chev">✎</span>' : ""}</div>`).join("") : `<p class="hint" style="margin:0 0 4px">Sin contactos.</p>`);
+  }).join("");
+}
+function abrirContacto(c) {
+  estado._ctEdit = c || null;
+  $("#ct-titulo").textContent = c ? "Editar contacto" : "Nuevo contacto";
+  $("#ct-cat").value = c ? c.categoria : "COMERCIAL";
+  $("#ct-nombre").value = c ? c.nombre : ""; $("#ct-tel").value = c ? c.telefono : "";
+  $("#ct-quitar").hidden = !c;
+  $("#sheet-contacto").hidden = false;
+}
+async function guardarContacto() {
+  const nombre = $("#ct-nombre").value.trim(), tel = $("#ct-tel").value.trim();
+  if (!nombre || !numWA(tel)) { toast("Escribe el nombre y un teléfono válido.", "err"); return; }
+  const f = { categoria: $("#ct-cat").value, nombre, telefono: tel }, c = estado._ctEdit;
+  if (c) { Object.assign(c, f); if (!c._nuevo) c._patch = Object.assign(c._patch || {}, f); }
+  else (estado.contactos = estado.contactos || []).push(Object.assign({ id: "tmp" + uid(8), _nuevo: true, activo: true, creado_por: estado.tecnico }, f));
+  await guardarContactos(); $("#sheet-contacto").hidden = true; pintarContactos(); syncContactos(true);
+  toast("Contacto guardado.", "ok");
+}
+async function quitarContacto() {
+  const c = estado._ctEdit; if (!c) return;
+  if (c._nuevo) estado.contactos = estado.contactos.filter(x => x !== c);
+  else { c.activo = false; c._patch = Object.assign(c._patch || {}, { activo: false }); }
+  await guardarContactos(); $("#sheet-contacto").hidden = true; pintarContactos(); syncContactos(true);
+}
+
+// ---- Destinatarios WhatsApp: grupo técnico → cliente → adicionales ----
+function abrirDestinos(o) {
+  estado._dest = o;
+  const todos = contactosTodos();
+  const yo = (estado.tecnico || "").toLowerCase();
+  $("#dest-titulo").textContent = o.titulo || "Enviar por WhatsApp";
+  const sec = (cats, vacio) => cats.map(cat => {
+    const l = todos.filter(c => c.cat === cat); if (!l.length) return "";
+    return `<div class="dest-cat">${CATS.find(x => x[0] === cat)[1]}</div>` + l.map(c => `
+      <label class="dest-fila"><input type="checkbox" class="dest-chk" data-nombre="${ESC(c.nombre)}" data-tel="${c.tel}" ${c.nombre.toLowerCase() === yo ? "" : "checked"}>
+      <span>${ESC(c.nombre)}<small>+${c.tel}</small></span></label>`).join("");
+  }).join("") || `<p class="hint">${vacio}</p>`;
+  const cli = o.cliente || {}; const telCli = numWA(cli.tel);
+  $("#dest-cuerpo").innerHTML = `
+    <h3 class="eq-h">1 · Grupo técnico</h3>${sec(GRUPO_TECNICO, "Aún no hay contactos. Agrégalos en Inicio → Contactos WhatsApp.")}
+    <h3 class="eq-h">2 · Cliente</h3>
+    <label class="dest-fila"><input type="checkbox" id="dest-cli" ${o.clienteDefault ? "checked" : ""}>
+      <span>Enviar también al cliente (constancia)<small>${ESC(cli.nombre || "Cliente")}${telCli ? " · +" + telCli : ""}</small></span></label>
+    ${telCli ? "" : `<input id="dest-cli-tel" type="tel" inputmode="tel" placeholder="Teléfono del cliente" style="width:100%;margin:4px 0 8px">`}
+    <h3 class="eq-h">3 · Otros números</h3>${sec(["ADICIONAL"], "")}
+    <input id="dest-otro" type="tel" inputmode="tel" placeholder="Otro número (ej. 0991234567)" style="width:100%;margin-top:6px">`;
+  const hayFiles = o.files && o.files.length;
+  $("#dest-pie").innerHTML = `
+    <button class="btn btn-primary btn-block" id="dest-enviar">📲 Enviar por WhatsApp a los marcados</button>
+    <button class="btn btn-ghost btn-block" id="dest-compartir" style="margin-top:8px">📤 ${hayFiles ? "Compartir con fotos/video… (eliges el chat o grupo)" : "Compartir… (eliges el chat o grupo)"}</button>
+    ${hayFiles ? `<p class="hint">WhatsApp solo adjunta fotos y videos con «Compartir…». El envío directo manda el texto.</p>` : ""}`;
+  $("#dest-enviar").onclick = armarColaDestinos;
+  $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, o.files, o.titulo)) { if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; } };
+  $("#sheet-dest").hidden = false;
+  syncContactos();
+}
+function armarColaDestinos() {
+  const o = estado._dest, dest = [];
+  $$("#dest-cuerpo .dest-chk").forEach(c => { if (c.checked) dest.push({ nombre: c.dataset.nombre, tel: c.dataset.tel }); });
+  if ($("#dest-cli") && $("#dest-cli").checked) {
+    const t = numWA((o.cliente || {}).tel || ($("#dest-cli-tel") ? $("#dest-cli-tel").value : ""));
+    if (!t) { toast("Falta el teléfono del cliente.", "err"); return; }
+    dest.push({ nombre: "Cliente · " + ((o.cliente || {}).nombre || ""), tel: t });
+  }
+  const otro = $("#dest-otro") ? numWA($("#dest-otro").value) : "";
+  if (otro) dest.push({ nombre: "Otro número", tel: otro });
+  const vistos = new Set(); const unicos = dest.filter(d => !vistos.has(d.tel) && vistos.add(d.tel));
+  if (!unicos.length) { toast("Marca al menos un destinatario.", "err"); return; }
+  $("#dest-cuerpo").innerHTML = `<p class="hint">Toca cada destinatario: se abre WhatsApp con el mensaje listo y tú pulsas Enviar.</p>` +
+    unicos.map((d, i) => `<div class="row dest-q" data-i="${i}"><div class="row-main"><div class="row-title">${ESC(d.nombre)}</div><div class="row-sub">+${d.tel}</div></div>
+      <button class="btn btn-primary" style="min-height:42px;padding:0 14px">Abrir ▶</button></div>`).join("");
+  $$("#dest-cuerpo .dest-q").forEach(r => r.querySelector("button").onclick = () => {
+    const d = unicos[Number(r.dataset.i)];
+    try { window.open("https://wa.me/" + d.tel + "?text=" + encodeURIComponent(o.texto), "_blank"); } catch (x) { /* popup bloqueado */ }
+    r.classList.add("hecho"); r.querySelector("button").textContent = "✓ Abierto";
+  });
+  $("#dest-pie").innerHTML = `<button class="btn btn-primary btn-block" id="dest-listo">Listo</button>`;
+  $("#dest-listo").onclick = () => { if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; };
+}
+async function compartirNativo(texto, files, titulo) {
+  const d = { text: texto, title: titulo || "PROSOL" };
+  if (files && files.length) { if (navigator.canShare && navigator.canShare({ files })) d.files = files; else toast("Tu celular no adjunta archivos aquí: se comparte solo el texto.", ""); }
+  if (navigator.share) { try { await navigator.share(d); return true; } catch (x) { return false; } }
+  try { await navigator.clipboard.writeText(texto); toast("Mensaje copiado. Pégalo en WhatsApp.", "ok"); return true; }
+  catch (x) { toast("No se pudo compartir.", "err"); return false; }
+}
+
+// ---- Seguimiento de la visita: etapas y avances parciales ----
+const ETAPAS = [["PROGRAMADA", "Programada", "📅"], ["EN_CAMINO", "En camino", "🚚"], ["EN_SITIO", "En sitio", "📍"], ["EN_PROCESO", "En proceso", "🔧"], ["FINALIZADA", "Finalizada", "✅"]];
+const etapaTxt = c => { const x = ETAPAS.find(e => e[0] === c); return x ? x[2] + " " + x[1] : c; };
+const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmtFecha(iso.slice(0, 10)) + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+function segDe(key, crear) {
+  estado.seguim = estado.seguim || {};
+  if (!estado.seguim[key] && crear) estado.seguim[key] = { key, etapa: "PROGRAMADA", ev: [], av: [] };
+  return estado.seguim[key] || null;
+}
+async function guardarSeg() {
+  if (!estado.tecnico) return;
+  await DB.set("seguim::" + estado.tecnico, estado.seguim || {});
+  await DB.set("avq::" + estado.tecnico, estado.avQ || []);
+}
+function migrarSeg(viejo, nuevo) {
+  if (viejo === nuevo) return;
+  if (estado.seguim && estado.seguim[viejo]) { estado.seguim[nuevo] = estado.seguim[viejo]; estado.seguim[nuevo].key = nuevo; delete estado.seguim[viejo]; }
+  (estado.avQ || []).forEach(r => { if (r.fila.clave_visita === viejo) r.fila.clave_visita = nuevo; });
+  if (estado._otCtx && estado._otCtx.segKey === viejo) estado._otCtx.segKey = nuevo;
+  guardarSeg();
+}
+function anotarSeg(key, serie, tipo, etapa, texto, adjuntos) {
+  const sg = segDe(key, true), t = new Date().toISOString();
+  if (tipo === "ETAPA") { sg.etapa = etapa; sg.ev.push({ e: etapa, t }); }
+  else sg.av.push({ t, texto: texto || "", n: adjuntos || 0 });
+  (estado.avQ = estado.avQ || []).push({ fila: { serie, clave_visita: key, numero_ot: sg.numero_ot || null, tecnico: estado.tecnico, tipo, etapa: etapa || sg.etapa, texto: texto || null, adjuntos: adjuntos || 0, ocurrio: t } });
+  guardarSeg(); syncAvances();
+}
+let _avBusy = false;
+async function syncAvances() {
+  if (_avBusy || typeof API === "undefined" || !API.hayNube() || !navigator.onLine || !(estado.avQ || []).length) return;
+  _avBusy = true;
+  try { for (const r of (estado.avQ || []).slice()) { try { await API.insert("ot_avances", r.fila); estado.avQ = estado.avQ.filter(x => x !== r); } catch (x) { break; } } }
+  finally { _avBusy = false; guardarSeg(); }
+}
+function itemDeTarjeta(k, id) {
+  if (k === "PROG") {
+    const p = (estado.catalogo?.programaciones || []).find(x => String(x.ID_VISITA || x.ID_SB) === id); if (!p) return null;
+    return Object.assign({ k, id, p, serie: p.SERIE, tipoMant: p.TIPO_MANTENIMIENTO || "Mantenimiento", clase: "PROGRAMADA" }, datosTarjeta(p.SERIE, p.ID_CLIENTE));
+  }
+  const s = (estado.solicitudes || []).find(x => String(x.id) === id); if (!s) return null;
+  return Object.assign({ k, id, s, serie: s.serie, tipoMant: s.tipo_mantenimiento || "Mantenimiento", clase: s.clase }, datosTarjeta(s.serie, s.id_cliente, s.cliente_nombre));
+}
+function atenderItem(it) {
+  const key = it.k + ":" + it.id; marcarVisto(it.id);
+  if (it.k === "PROG") nuevaOT(it.e || { SERIE: it.p.SERIE, ID_CLIENTE: it.p.ID_CLIENTE }, it.p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: it.p, segKey: key });
+  else nuevaOT(it.e || { SERIE: it.s.serie, ID_CLIENTE: it.s.id_cliente }, it.s.tipo_mantenimiento, { clase: it.s.clase, sol: it.s, segKey: key });
+}
+function cabeceraMsg(it, titulo) {
+  return ["*PROSOL — " + titulo + "*", "Cliente: " + it.cliente, "Equipo: " + it.equipo + " · Serie " + it.serie,
+    "Tipo: " + it.tipoMant + (it.clase === "URGENTE" ? " · 🚨 URGENTE" : ""), "Técnico: " + estado.tecnico];
+}
+function msgEtapa(it, etapa) {
+  const L = cabeceraMsg(it, "Seguimiento de servicio");
+  L.push("Estado: " + etapaTxt(etapa), "Hora: " + hhmm(new Date().toISOString()), "", "— PROSOL Campo —");
+  return L.join("\n");
+}
+function msgParcial(it, texto, n) {
+  const L = cabeceraMsg(it, "AVANCE PARCIAL (PRESUNTIVO)");
+  L.push("", "Detalle: " + (texto || "(ver fotos/video)"));
+  if (n) L.push("📎 " + n + " adjunto(s) en este aviso");
+  L.push("", "_Información preliminar: se confirma en el reporte final de la OT._", "— PROSOL Campo —");
+  return L.join("\n");
+}
+function avancesTexto(h) {
+  const sg = Object.values(estado.seguim || {}).find(s => s.numero_ot && String(s.numero_ot) === String(h.NUMERO_OT));
+  if (!sg || (!sg.ev.length && !sg.av.length)) return "";
+  const L = ["", "*Seguimiento de la visita:*"];
+  sg.ev.forEach(x => L.push("• " + etapaTxt(x.e) + " — " + hhmm(x.t)));
+  sg.av.forEach(x => L.push("• Avance parcial " + hhmm(x.t) + ": " + (x.texto || "(adjuntos)")));
+  return L.join("\n");
+}
+function abrirSeg(it) {
+  estado._segIt = it; estado._segFiles = [];
+  const key = it.k + ":" + it.id, sg = segDe(key, false) || { etapa: "PROGRAMADA", ev: [], av: [] };
+  $("#seg-titulo").textContent = "Seguimiento · Serie " + it.serie;
+  $("#seg-cli").innerHTML = `<div class="row-title" style="white-space:normal">${ESC(it.cliente)}</div><div class="row-sub" style="white-space:normal">${ESC(it.equipo)} · ${ESC(it.tipoMant)}</div>`;
+  const idx = ETAPAS.findIndex(e => e[0] === sg.etapa);
+  $("#seg-etapas").innerHTML = ETAPAS.map((e, i) => `<button class="seg-et ${i < idx ? "hecho" : ""} ${i === idx ? "on" : ""}" data-e="${e[0]}" ${e[0] === "FINALIZADA" ? "disabled" : ""}><span>${e[2]}</span>${e[1]}</button>`).join("");
+  $$("#seg-etapas .seg-et").forEach(b => b.onclick = () => {
+    anotarSeg(key, it.serie, "ETAPA", b.dataset.e); abrirSeg(it); pintarHoy(); toast("Etapa: " + etapaTxt(b.dataset.e), "ok");
+  });
+  $("#seg-texto").value = ""; $("#seg-archivos-info").textContent = "";
+  const log = [].concat(sg.ev.map(x => ({ t: x.t, h: etapaTxt(x.e) })), sg.av.map(x => ({ t: x.t, h: "Avance parcial" + (x.n ? " · 📎" + x.n : ""), d: x.texto }))).sort((a, b) => b.t.localeCompare(a.t));
+  $("#seg-log").innerHTML = log.length ? log.map(x => `<li class="tl-item"><div class="tl-date">${ESC(hhmm(x.t))} · ${ESC(x.h)}</div>${x.d ? `<div class="tl-acts">${ESC(x.d)}</div>` : ""}</li>`).join("") : `<li class="hint">Aún sin registros.</li>`;
+  $("#sheet-seg").hidden = false;
+}
+function datosClienteIt(it) { const c = clientePorId(it.e ? it.e.ID_CLIENTE : null); return { nombre: it.cliente, tel: c ? c.TELEFONO : "" }; }
+function segAvisarEtapa() {
+  const it = estado._segIt; if (!it) return;
+  const sg = segDe(it.k + ":" + it.id, false);
+  const et = sg ? sg.etapa : "PROGRAMADA";
+  abrirDestinos({ titulo: "Avisar: " + etapaTxt(et), texto: msgEtapa(it, et), files: [], cliente: datosClienteIt(it) });
+}
+function segInformarParcial() {
+  const it = estado._segIt; if (!it) return;
+  const texto = $("#seg-texto").value.trim(), files = estado._segFiles || [];
+  if (!texto && !files.length) { toast("Escribe el detalle o agrega foto/video.", "err"); return; }
+  anotarSeg(it.k + ":" + it.id, it.serie, "PARCIAL", null, texto, files.length);
+  const msg = msgParcial(it, texto, files.length);
+  const sg = segDe(it.k + ":" + it.id, false);
+  $("#sheet-seg").hidden = true; pintarHoy();
+  abrirDestinos({ titulo: "Avance parcial (presuntivo)", texto: msg, files, cliente: datosClienteIt(it), clienteDefault: true });
+}
+function cerrarSegPorOT(ctx, numero) {
+  if (!ctx || !ctx.segKey) return;
+  const serie = ctx.visita ? ctx.visita.SERIE : (ctx.sol ? ctx.sol.serie : "");
+  const sg = segDe(ctx.segKey, true); sg.numero_ot = numero;
+  anotarSeg(ctx.segKey, serie, "ETAPA", "FINALIZADA");
+}
+function fotosComoFiles(h) {
+  const files = [];
+  (h._fotos || []).forEach((f, idx) => {
+    try {
+      const bin = atob(f.dataUrl.split(",")[1]); const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      files.push(new File([new Blob([arr], { type: "image/jpeg" })], f.nombre || ("foto_" + (idx + 1) + ".jpg"), { type: "image/jpeg" }));
+    } catch (e) { /* foto liberada o ilegible */ }
+  });
+  return files;
+}
+function enviarOrdenConDestinos() {
+  const h = estado.historial[estado._ordenHist]; if (!h) return;
+  const eq = equipoPorSerie(h.SERIE), c = clientePorId(eq ? eq.ID_CLIENTE : null);
+  abrirDestinos({ titulo: "Reporte final · OT " + (h.NUMERO_OT || ""), texto: resumenOrdenTexto(h) + avancesTexto(h), files: fotosComoFiles(h),
+    cliente: { nombre: h.RAZON_SOCIAL, tel: c ? c.TELEFONO : "" }, clienteDefault: true,
+    alTerminar: () => { h._enviada = true; guardarLocal(); pintarHistorial(); } });
+}
+
 // ---------- Listeners ----------
 function wire() {
   // navegación por data-go
   document.body.addEventListener("click", (e) => {
     const b = e.target.closest("[data-go]");
     if (b) ir(b.dataset.go);
+  });
+  $("#btn-nueva-ot").onclick = () => { if (!estado.catalogo) { toast("Primero carga el catálogo de oficina.", "err"); return; } nuevaOT(null); };
+  $("#btn-admin-movil").onclick = () => { if (typeof PROSOL_WEB !== "undefined" && PROSOL_WEB.abrirLoginAdmin) PROSOL_WEB.abrirLoginAdmin(); };
+  $("#hf-cerrar").onclick = $("#hf-cerrar2").onclick = () => { $("#sheet-hoy-flot").hidden = true; };
+  $("#sheet-hoy-flot").addEventListener("click", (e) => { if (e.target.id === "sheet-hoy-flot") e.target.hidden = true; });
+  $("#hf-ir").onclick = () => { $("#sheet-hoy-flot").hidden = true; ir("hoy"); };
+  $("#buscar-cliente").addEventListener("input", pintarClientes);
+  $("#seg-cerrar").onclick = () => { $("#sheet-seg").hidden = true; };
+  $("#seg-avisar").onclick = segAvisarEtapa;
+  $("#seg-informar").onclick = segInformarParcial;
+  $("#seg-atender").onclick = () => { const it = estado._segIt; $("#sheet-seg").hidden = true; if (it) atenderItem(it); };
+  $("#seg-archivos").onchange = (e) => {
+    estado._segFiles = (estado._segFiles || []).concat(Array.from(e.target.files)); e.target.value = "";
+    $("#seg-archivos-info").textContent = estado._segFiles.length + " archivo(s) listo(s) para compartir.";
+  };
+  $("#dest-cerrar").onclick = () => { $("#sheet-dest").hidden = true; };
+  $("#ct-cerrar").onclick = () => { $("#sheet-contacto").hidden = true; };
+  $("#ct-guardar").onclick = guardarContacto; $("#ct-quitar").onclick = quitarContacto;
+  $("#btn-contacto-nuevo").onclick = () => abrirContacto(null);
+  $("#contactos-lista").addEventListener("click", (e) => {
+    const r = e.target.closest(".ct-row"); if (!r) return;
+    const c = (estado.contactos || []).find(x => String(x.id) === r.dataset.id); if (c) abrirContacto(c);
   });
   $("#btn-entrar").onclick = async () => {
     const n = ($("#login-tecnico").value || "").trim();
@@ -1422,8 +1879,10 @@ function wire() {
     // cargar órdenes y envíos guardados de ESTE técnico
     estado.ordenes = (await DB.get("ordenes::" + n)) || [];
     estado.envios = (await DB.get("envios::" + n)) || [];
+    estado.seguim = (await DB.get("seguim::" + n)) || {}; estado.avQ = (await DB.get("avq::" + n)) || [];
     await guardarLocal();
     ir("inicio");
+    estado._hfVisto = false; setTimeout(mostrarHoyFlotante, 400);
   };
   $("#btn-logout").onclick = async () => {
     const n = estado.ordenes.length;
@@ -1456,7 +1915,7 @@ function wire() {
   if ($("#buscar-hist")) $("#buscar-hist").oninput = () => pintarHistorial();
   if ($("#sheet-orden-close")) $("#sheet-orden-close").onclick = () => $("#sheet-orden").hidden = true;
   if ($("#btn-orden-reenviar")) $("#btn-orden-reenviar").onclick = reenviarOrdenIndividual;
-  if ($("#btn-orden-whatsapp")) $("#btn-orden-whatsapp").onclick = enviarOrdenWhatsApp;
+  if ($("#btn-orden-whatsapp")) $("#btn-orden-whatsapp").onclick = enviarOrdenConDestinos;
   if ($("#btn-orden-confirmar")) $("#btn-orden-confirmar").onclick = toggleConfirmada;
   $("#btn-ot-desde-eq").onclick = () => abrirNuevaVisita(estado._equipoActual);
   if ($("#sheet-eq-edit-close")) $("#sheet-eq-edit-close").onclick = () => $("#sheet-eq-edit").hidden = true;
@@ -1502,7 +1961,7 @@ function wire() {
       estado.fotos.length || $("#ot-obs").value.trim() ||
       (firma && firma.tieneTrazo);
     if (hayDatos && !confirm("¿Descartar esta orden sin guardar?\n\nSe perderá lo que escribiste.")) return;
-    ir("inicio");
+    volver();
   };
   $("#btn-exportar").onclick = exportarPaquete;
   window.addEventListener("resize", ajustarFirma);
@@ -1535,7 +1994,7 @@ function pintarLogin() {
   $("#login-sin-cat").hidden = hayCat;
   $("#login-con-cat").hidden = !hayCat;
   const vtag = $("#app-version-login");
-  if (vtag) vtag.textContent = "Versión " + APP_VERSION;
+  if (vtag) vtag.textContent = "PROSOL Campo " + APP_VERSION;
   if (!hayCat) return;
   // llenar combo con técnicos del catálogo
   const sel = $("#login-tecnico"); sel.innerHTML = "";
@@ -1573,15 +2032,17 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.43";
+const APP_VERSION = "v3.44";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
   const lib = liberarFotosViejas();
   if (lib) await guardarLocal();
   wire(); initFirma(); refrescarSync();
+  instalarAtras();
   ir(estado.tecnico ? "inicio" : "login");
   pintarLogin();
+  if (estado.tecnico) setTimeout(mostrarHoyFlotante, 600);
   escucharArchivosEntrantes();
   await revisarArchivoCompartido();
   // Aviso al cerrar/recargar si hay órdenes sin empaquetar o archivos sin enviar
@@ -1594,6 +2055,8 @@ async function init() {
     }
   });
   const vtag = $("#app-version"); if (vtag) vtag.textContent = "Versión " + APP_VERSION;
+  const bv = $("#brand-ver"); if (bv) bv.textContent = APP_VERSION;
+  const vi = $("#app-version-inicio"); if (vi) vi.textContent = "PROSOL Campo " + APP_VERSION;
   if ("serviceWorker" in navigator) {
     try {
       const reg = await navigator.serviceWorker.register("service-worker.js");

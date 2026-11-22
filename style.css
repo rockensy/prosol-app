@@ -424,3 +424,37 @@ label{display:block;font-size:12px;font-weight:700;margin:8px 0 3px;color:var(--
 .nv-clase small{color:var(--texto-2)}
 .nv-clase:has(input:checked){border-color:var(--azul)} .nv-clase.urg:has(input:checked){border-color:var(--rojo)}
 #btn-nv-elegir{right:6px} #btn-nv-qr{right:92px;padding:0 12px} .field input#nv-serie{padding-right:170px}
+
+/* ---------- M9-C (v3.44) ---------- */
+.syncbar-left{display:flex;align-items:baseline;flex-wrap:wrap}
+.brand-ver{margin-left:6px;font-size:.62rem;font-weight:800;color:#3a2a00;background:var(--ambar);border-radius:999px;padding:1px 7px}
+.hb.et{background:#DCEBFA;color:#1B4F8A}
+.hc-acc{display:flex;gap:8px}.hc-acc .btn{flex:1}
+.hf-resumen{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.hf-fila{background:var(--blanco);border-radius:10px;padding:8px 12px;font-size:.92rem}
+.hf-fila b{font-size:1.2rem;margin-right:4px}.hf-fila.urg b,.hf-fila.venc b{color:var(--rojo)}.hf-fila.aut b{color:var(--azul)}
+.hf-item{background:var(--blanco);border-radius:10px;padding:8px 12px;margin-bottom:6px;display:flex;flex-direction:column}
+.hf-item span{color:var(--texto-2);font-size:.85rem}
+.seg-cli{margin-bottom:10px}
+.seg-etapas{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.seg-et{border:2px solid var(--linea);background:var(--blanco);border-radius:10px;padding:6px 2px;font-size:.66rem;font-weight:700;
+  display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;color:var(--texto-2)}
+.seg-et span{font-size:1.2rem}.seg-et.hecho{background:#E4F4EA;border-color:#9ED3B0;color:#1E6B3A}
+.seg-et.on{background:var(--ambar);border-color:var(--ambar);color:#3a2a00}.seg-et:disabled{opacity:.55;cursor:default}
+.dest-cat{font-weight:800;font-size:.85rem;margin:8px 0 2px}
+.dest-fila{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--linea)}
+.dest-fila input{width:22px;height:22px;flex:none}.dest-fila small{display:block;color:var(--texto-2)}
+.dest-q.hecho{opacity:.6}
+.ct-row{cursor:pointer}
+body.modo-admin #appView{display:block!important}
+body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-admin #fab-visita,body.modo-admin .sheet{display:none!important}
+@media(max-width:699px){
+  body.modo-admin .topbar{flex-wrap:wrap}
+  body.modo-admin .nav-pc{order:9;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;padding:4px 0}
+  body.modo-admin .nav-pc button{white-space:nowrap}
+  body.modo-admin .main-pc{padding:8px}
+  body.modo-admin .grid2{grid-template-columns:1fr}
+  body.modo-admin .card{max-width:100%;overflow-x:auto}
+  body.modo-admin .kpis{grid-template-columns:repeat(2,1fr)}
+}
+#seg-texto{width:100%;min-height:84px}

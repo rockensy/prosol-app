@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.43</strong>
+        <strong>Versión PROSOL v3.44</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -141,6 +141,9 @@ async function doLogin() {
   const pass = $id('wl_pass').value||'';
   const msg  = $id('wl_msg');
   if(msg) msg.textContent = '';
+  const _adm = !!window._prosolAdminMovil;
+  if (_adm && !API.hayNube()) { if(msg) msg.textContent = '⚠ Conecta Supabase (⚙) para el acceso administrador.'; return; }
+  const _noAdmin = (ses) => { if (_adm && String(ses.perfil||'').toUpperCase() !== 'ADMIN') { if(msg) msg.textContent = 'Solo el administrador puede usar este acceso.'; try{AUTH.logout();}catch(x){} return true; } return false; };
 
   function quitarLogin() {
     const lv = $id('loginWebPC'); if(lv) lv.remove();
@@ -166,6 +169,7 @@ async function doLogin() {
     if(msg) msg.textContent = '⏳ Verificando...';
     await AUTH.asegurarAdmin().catch(()=>{});
     const sesion = await AUTH.login(user, pass);
+    if (_noAdmin(sesion)) return;
     quitarLogin();
     arrancarApp(sesion);
   } catch(e) {
@@ -174,6 +178,7 @@ async function doLogin() {
     try {
       await AUTH.asegurarAdmin();
       const sesion = await AUTH.login(user, pass);
+      if (_noAdmin(sesion)) return;
       quitarLogin();
       arrancarApp(sesion);
     } catch(e2) {
@@ -208,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.43';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.44';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1866,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.43</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.44</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2368,6 +2373,26 @@ async function _verOT(id,ord,eqMap,cliMap){
   $id('verWA').addEventListener('click',()=>{cerrarModal();ir('whatsapp');setTimeout(()=>{const s=$id('waOrdSel');if(s){s.value=id;$id('btnWaPrev')&&$id('btnWaPrev').click();}},500);});
 }
 
+/* ── Acceso administrador desde el móvil (<700px): muestra los módulos de escritorio ── */
+function abrirLoginAdmin() {
+  if ($id('loginWebPC')) return;
+  window._prosolAdminMovil = true;
+  document.body.classList.add('modo-admin');
+  mostrarLogin();
+  const btn = $id('wl_btn');
+  if (btn && btn.parentElement) {
+    const v = document.createElement('button');
+    v.id = 'wl_volver'; v.textContent = '← Volver al modo campo';
+    v.style.cssText = 'width:100%;padding:10px;background:#eee;color:#1C2733;border:none;border-radius:10px;font-weight:700;margin-top:8px;cursor:pointer';
+    v.addEventListener('click', () => {
+      const lv = $id('loginWebPC'); if (lv) lv.remove();
+      window._prosolAdminMovil = false; document.body.classList.remove('modo-admin');
+      const sb = $id('syncbar'), ap = $id('app'); if (sb) sb.style.display = ''; if (ap) ap.style.display = '';
+    });
+    btn.parentElement.appendChild(v);
+  }
+}
+
 /* ── Logout ─────────────────────────────────────────────────────────── */
 function logout(){
   if(typeof AUTH!=='undefined') AUTH.logout();
@@ -2388,5 +2413,5 @@ _irConfig = function() {
   const a = document.getElementById('aviso-sin-key'); if(a) a.remove();
   ir('config');
 }
-return { logout, ir, irConfig: _irConfig, _cargarActsCatalogo, _waFiltrarOrd: ()=>_waFiltrarOrd&&_waFiltrarOrd(), _waGenerar: ()=>_waGenerar&&_waGenerar(), _reenviarComm: (id)=>{ toast('ℹ Función pendiente de implementar'); }, abrirConfigPanel, cerrarModal };
+return { logout, ir, abrirLoginAdmin, irConfig: _irConfig, _cargarActsCatalogo, _waFiltrarOrd: ()=>_waFiltrarOrd&&_waFiltrarOrd(), _waGenerar: ()=>_waGenerar&&_waGenerar(), _reenviarComm: (id)=>{ toast('ℹ Función pendiente de implementar'); }, abrirConfigPanel, cerrarModal };
 })();
