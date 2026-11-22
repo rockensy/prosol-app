@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.51</strong>
+        <strong>Versión PROSOL v3.53</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.51';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.53';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.51</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.53</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -1918,8 +1918,19 @@ VIEWS.config = async ()=>{
 
   // Usuarios
   async function cargarUsuarios(){
+    // v3.53: en la nube la tabla usuarios está protegida; se lista con la función del servidor
+    // y solo con la contraseña del administrador confirmada (se guarda solo en memoria).
+    if(API.hayNube() && !AUTH.credAdmin()){
+      $id('cfgUsuarios').innerHTML=`<p style="color:#555;font-size:13px;margin:0 0 6px">🔒 Para ver y editar usuarios confirma tu contraseña de administrador.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><input class="inp-web" id="cfgAdmPwd" type="password" placeholder="Tu contraseña" style="max-width:220px">
+        <button class="btn-web prim" id="cfgAdmOk">Confirmar</button></div><p id="cfgAdmMsg" style="color:#E74C3C;font-size:12px;margin:6px 0 0"></p>`;
+      const ok=async()=>{ try{ await AUTH.confirmarAdmin($id('cfgAdmPwd').value); cargarUsuarios(); }catch(e){ $id('cfgAdmMsg').textContent='❌ '+e.message; } };
+      $id('cfgAdmOk').addEventListener('click',ok);
+      $id('cfgAdmPwd').addEventListener('keydown',e=>{ if(e.key==='Enter') ok(); });
+      return;
+    }
     try{
-      const usrs=await API.select('usuarios').catch(()=>[]);
+      const usrs=API.hayNube() ? await AUTH.listarUsuariosNube() : await API.select('usuarios').catch(()=>[]);
       $id('cfgUsuarios').innerHTML=usrs.length
         ? tabla(['Usuario','Nombre','Perfil','Estado',''],
             usrs.map(u=>[ESC(u.usuario||'—'),ESC(u.nombre||'—'),ESC(u.perfil||'—'),
@@ -1932,7 +1943,7 @@ VIEWS.config = async ()=>{
   }
   cargarUsuarios();
 
-  $id('btnNuevoUsr').addEventListener('click',()=>_editarUsuario(null,[]));
+  $id('btnNuevoUsr').addEventListener('click',()=>{ if(API.hayNube() && !AUTH.credAdmin()){ toast('🔒 Primero confirma tu contraseña de administrador (en Usuarios del sistema)'); const i=$id('cfgAdmPwd'); if(i) i.focus(); return; } _editarUsuario(null,[]); });
 };
 
 function _editarUsuario(id, lista){
@@ -1966,6 +1977,13 @@ function _editarUsuario(id, lista){
     const pwd=$id('uu_pwd').value;
     if(!usr){toast('⚠ El nombre de usuario es obligatorio');return;}
     const row={usuario:usr,nombre:nom,perfil:$id('uu_per').value,estado:$id('uu_est').value};
+    // v3.53: en la nube se guarda con la función del servidor (valida al administrador, sal aleatoria por usuario)
+    if(API.hayNube()){
+      if(!u && !pwd){toast('⚠ La contraseña es obligatoria para un usuario nuevo');return;}
+      try{ await AUTH.guardarUsuarioNube(u?u.id:null,row,pwd||null); cerrarModal(); toast('✅ Usuario guardado'); VIEWS.config(); }
+      catch(e){ toast('❌ '+(e.message||e)); }
+      return;
+    }
     // Hash de contraseña si se ingresó
     if(pwd){
       try{

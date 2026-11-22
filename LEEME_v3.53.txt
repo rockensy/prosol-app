@@ -1,0 +1,23 @@
+PROSOL FUSION — ENTREGA v3.53 (solo app; el escritorio no cambia). Incluye v3.51.
+==============================================================================
+Qué es: corrección de «Nuevo usuario» en Configuración (vista PC / acceso administrador): al guardar salía
+«Nube insert usuarios: 401 ... permission denied for table usuarios» y no se guardaba.
+
+Causa: desde M11 la tabla de usuarios de la nube está protegida a propósito (nadie con la clave pública de la app
+puede leer ni escribir contraseñas). La pantalla de usuarios seguía intentando escribir directo en esa tabla.
+
+Corrección:
+ - Nube (ya aplicado por Claude): funciones pwa_usuarios_listar y pwa_usuario_guardar. Solo funcionan si quien
+   las pide es un ADMIN ACTIVO con su contraseña correcta; nunca devuelven contraseñas; impiden usuarios repetidos
+   y dejar el sistema sin ningún administrador activo. La tabla sigue protegida.
+ - App: la lista y el guardado de usuarios usan esas funciones. La contraseña del administrador se usa solo en
+   memoria (si se recarga la página, Configuración pide confirmarla una vez). Cada usuario nuevo recibe su propia
+   sal de contraseña. Los errores muestran el motivo real (ej. «ya existe un usuario con ese nombre»).
+
+Archivos: subir TODO el contenido de esta carpeta al repositorio rockensy/prosol-app (reemplazando).
+
+Validación: nube real (prueba revertida): contraseña incorrecta rechazada, lista sin contraseñas, crear, duplicado
+rechazado, tabla protegida. App (navegador real, vista PC, nube simulada igual a la real): usuarios 13/13
+(incluye crear «Andres Aguirre Perero» TECNICO y que Andres inicie sesión), sitio 28/28, oficina 49/49,
+envíos 38/38, actividades 18/18, actualización automática PC y celular 12/12.
+Estado: CERRADO v3.53.
