@@ -463,6 +463,10 @@ body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-
   body.modo-admin .kpis{grid-template-columns:repeat(2,1fr)}
 }
 #seg-texto{width:100%;min-height:84px}
+/* v3.47: WhatsApp con su propia lista de contactos y grupos */
+.dest-wa-libre{min-height:56px;font-size:1.05rem}
+.dest-rapida{margin-top:14px;border-top:1px solid #E1E6EB;padding-top:8px}
+.dest-rapida>summary{font-weight:800;color:var(--grafito);padding:6px 0;cursor:pointer}
 /* v3.46: envío a oficina rastreado */
 #sheet-guardada [hidden],#nube-card [hidden]{display:none!important}
 .nube-chip{font-size:.72rem;font-weight:800;border-radius:8px;padding:3px 8px;white-space:nowrap;align-self:center}

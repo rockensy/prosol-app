@@ -1771,20 +1771,29 @@ async function abrirDestinos(o) {
       <span>${ESC(c.nombre)}<small>+${c.tel}</small></span></label>`).join("");
   }).join("") || `<p class="hint">${vacio}</p>`;
   const cli = o.cliente || {}; const telCli = numWA(cli.tel);
+  const hayFiles = o.files && o.files.length;
   $("#dest-cuerpo").innerHTML = `
+    <button class="btn btn-primary btn-block dest-wa-libre" id="dest-wa-libre">📲 Abrir WhatsApp y elegir contactos o grupos</button>
+    <p class="hint" style="margin:6px 0 4px">Se abre WhatsApp con el reporte listo: eliges el chat o grupo (ej. Servicio Técnico PROSOL S.A.) y pulsas Enviar.</p>
+    <button class="btn btn-ghost btn-block" id="dest-compartir">📤 ${hayFiles ? "Compartir con fotos (eliges contactos o grupos)" : "Compartir… (eliges contactos o grupos)"}</button>
+    ${hayFiles ? `<p class="hint" style="margin:6px 0 0">Las fotos viajan solo con «Compartir». WhatsApp directo manda el texto.</p>` : ""}
+    <details class="dest-rapida"><summary>Lista rápida (números guardados)</summary>
     <h3 class="eq-h">1 · Grupo técnico</h3>${sec(GRUPO_TECNICO, "Aún no hay contactos. Agrégalos en Inicio → Contactos WhatsApp.")}
     <h3 class="eq-h">2 · Cliente</h3>
     <label class="dest-fila"><input type="checkbox" id="dest-cli" ${o.clienteDefault ? "checked" : ""}>
       <span>Enviar también al cliente (constancia)<small>${ESC(cli.nombre || "Cliente")}${telCli ? " · +" + telCli : ""}</small></span></label>
     ${telCli ? "" : `<input id="dest-cli-tel" type="tel" inputmode="tel" placeholder="Teléfono del cliente" style="width:100%;margin:4px 0 8px">`}
     <h3 class="eq-h">3 · Otros números</h3>${sec(["ADICIONAL"], "")}
-    <input id="dest-otro" type="tel" inputmode="tel" placeholder="Otro número (ej. 0991234567)" style="width:100%;margin-top:6px">`;
-  const hayFiles = o.files && o.files.length;
-  $("#dest-pie").innerHTML = `
-    <button class="btn btn-primary btn-block" id="dest-enviar">📲 Enviar por WhatsApp a los marcados</button>
-    <button class="btn btn-ghost btn-block" id="dest-compartir" style="margin-top:8px">📤 ${hayFiles ? "Compartir con fotos/video… (eliges el chat o grupo)" : "Compartir… (eliges el chat o grupo)"}</button>
-    ${hayFiles ? `<p class="hint">WhatsApp solo adjunta fotos y videos con «Compartir…». El envío directo manda el texto.</p>` : ""}`;
+    <input id="dest-otro" type="tel" inputmode="tel" placeholder="Otro número (ej. 0991234567)" style="width:100%;margin-top:6px">
+    <button class="btn btn-ghost btn-block" id="dest-enviar" style="margin-top:10px">📲 Enviar a los marcados (uno por uno)</button>
+    </details>`;
+  $("#dest-pie").innerHTML = "";
   $("#dest-enviar").onclick = armarColaDestinos;
+  $("#dest-wa-libre").onclick = () => {
+    try { window.open("https://wa.me/?text=" + encodeURIComponent(o.texto), "_blank"); } catch (x) { /* popup bloqueado */ }
+    registrarCompartido(o, "WhatsApp (contacto o grupo elegido en WhatsApp)", "ABIERTO");
+    if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews();
+  };
   $("#dest-compartir").onclick = async () => { if (await compartirNativo(o.texto, o.files, o.titulo)) { registrarCompartido(o); if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); } };
   $("#sheet-dest").hidden = false;
   syncContactos();
@@ -1864,9 +1873,9 @@ function pintarCola(L, o, soloPend) {
   $("#dest-pie").innerHTML = `<button class="btn btn-primary btn-block" id="dest-listo">Listo</button>`;
   $("#dest-listo").onclick = () => { cerrarLote(L); estado._lote = null; if (o.alTerminar) o.alTerminar(); $("#sheet-dest").hidden = true; refrescarEnvViews(); };
 }
-function registrarCompartido(o) {
-  const L = nuevoLote(o, [{ nombre: "Compartir… (chat o grupo elegido en el teléfono)", tel: "" }]);
-  marcarEnvio(L, L.dest[0], "COMPARTIDO"); L._cerrado = true; guardarEnv();
+function registrarCompartido(o, nombre, est) {
+  const L = nuevoLote(o, [{ nombre: nombre || "Compartir… (contacto o grupo elegido en el teléfono)", tel: "" }]);
+  marcarEnvio(L, L.dest[0], est || "COMPARTIDO"); L._cerrado = true; guardarEnv();
 }
 function reenviarPendientes(lote) {
   const L = (estado.waEnv || {})[lote]; if (!L || !lotePend(L).length) return;
@@ -2271,7 +2280,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.46";
+const APP_VERSION = "v3.47";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();

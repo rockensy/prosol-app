@@ -1,0 +1,13 @@
+PROSOL Campo v3.47 (22/11/2026) · Potenciado por ROCKENSY S.A. & MIG — Tec. Master Luis Martínez Ibáñez
+
+QUÉ ES: se devuelve el envío por WhatsApp abriendo la app de WhatsApp con el reporte listo para elegir
+cualquier contacto o GRUPO (ej. Servicio Técnico PROSOL S.A.).
+ALCANCE: en todos los envíos (al guardar la orden, Mis órdenes, aviso de etapa, avance parcial) la hoja muestra:
+  1) «📲 Abrir WhatsApp y elegir contactos o grupos» (wa.me con el mensaje, sin número fijo) — principal.
+  2) «📤 Compartir con fotos (eliges contactos o grupos)» — para adjuntar las fotos.
+  3) «Lista rápida (números guardados)» — plegada, la lista anterior por categorías.
+  Cada envío queda registrado en los estados de envío. Incluye todo lo de v3.46. Escritorio sin cambios.
+APLICACIÓN: subir el CONTENIDO de esta carpeta al repo rockensy/prosol-app (reemplaza). La app debe mostrar v3.47.
+VALIDACIÓN: Playwright 29/29 (guardar, WhatsApp libre desde la orden guardada y desde Mis órdenes, oficina por
+nube) · 34/34 estados de envío y reporte final · 18/18 actividades · node --check OK · versión v3.47 / SW v31.
+ESTADO: terminado y validado. Pendiente: prueba en el celular.
