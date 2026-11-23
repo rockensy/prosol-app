@@ -602,8 +602,20 @@ function pintarProgramaciones() {
       <span class="tw-c2">
         <div class="t2-main">${p.TIPO_MANTENIMIENTO || "Mantenimiento"}</div>
         <div class="t2-sub">Serie ${p.SERIE || "—"} · ${cli?.RAZON_SOCIAL || "—"}${(() => { const a = (estado.asig || {})["PROG:" + (p.ID_VISITA || p.ID_SB)]; return a && a.tecnico ? " · 👷 " + ESC(a.tecnico) : ""; })()}</div>
+        <div class="prog-acc" style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-primary btn-sm" data-pacc="atender">Atender</button>
+          <button class="btn btn-ghost btn-sm" data-pacc="seguir">🔎 Seguimiento / avance</button></div>
       </span>`;
+    // v3.61: desde Programaciones también se informa el avance al cliente (link de seguimiento)
+    li.querySelector('[data-pacc="seguir"]').onclick = (ev) => {
+      ev.stopPropagation();
+      const it = itemDeTarjeta("PROG", String(p.ID_VISITA || p.ID_SB));
+      if (it) abrirSeg(it); else toast("No se encontró la visita en el catálogo.", "err");
+    };
     li.onclick = () => {
+      // v3.61: la OT queda unida al seguimiento de la visita (mismo enlace para el cliente)
+      const it = itemDeTarjeta("PROG", String(p.ID_VISITA || p.ID_SB));
+      if (it) { atenderItem(it); return; }
       const eq = (estado.catalogo.equipos || []).find(e => e.SERIE === p.SERIE);
       marcarVisto(p.ID_VISITA || p.ID_SB);
       nuevaOT(eq || { SERIE: p.SERIE, ID_CLIENTE: p.ID_CLIENTE }, p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: p });
@@ -1031,6 +1043,7 @@ function abrirOrdenHistorial(idx) {
     <div class="row-sub">📷 ${fotosInfo}</div>
     ${envBloqueHTML((() => { const sg = sgDeOT(h); return lotesDe(sg ? sg.key : null, h.NUMERO_OT); })())}`;
   $("#btn-orden-confirmar").textContent = h._confirmada ? "Quitar confirmación" : "Marcar confirmada";
+  if ($("#btn-orden-avance")) $("#btn-orden-avance").onclick = () => { $("#sheet-orden").hidden = true; abrirSeg(itemDeOT(h)); };
   $("#sheet-orden").hidden = false;
 }
 async function reenviarOrdenIndividual() {
@@ -2318,7 +2331,23 @@ function itemDeTarjeta(k, id) {
   const s = (estado.solicitudes || []).find(x => String(x.id) === id); if (!s) return null;
   return Object.assign({ k, id, s, serie: s.serie, tipoMant: s.tipo_mantenimiento || "Mantenimiento", clase: s.clase }, datosTarjeta(s.serie, s.id_cliente, s.cliente_nombre));
 }
+// v3.61: seguimiento de una OT ya guardada (Mis órdenes): usa la visita de origen o crea uno propio de la OT,
+// con el MISMO enlace que el cliente ya recibió.
+function itemDeOT(h) {
+  let sg = sgDeOT(h), k, id;
+  if (sg) { const i = sg.key.indexOf(":"); k = sg.key.slice(0, i); id = sg.key.slice(i + 1); }
+  else {
+    k = "OT"; id = String(h.NUMERO_OT || h.COD_TEMP || h.FECHA);
+    sg = segDe(k + ":" + id, true); sg.numero_ot = h.NUMERO_OT || null;
+    if (h._segToken) sg.token = h._segToken; else h._segToken = sg.token;
+    sg.meta = sg.meta || { serie: h.SERIE, cliente: h.RAZON_SOCIAL, tipoMant: h.TIPO_OT };
+    guardarSeg(); guardarLocal();
+  }
+  return (k !== "OT" && itemDeTarjeta(k, id)) ||
+    Object.assign({ k, id, serie: h.SERIE, tipoMant: h.TIPO_OT || "Mantenimiento", clase: "", ot: h }, datosTarjeta(h.SERIE, null, h.RAZON_SOCIAL));
+}
 function atenderItem(it) {
+  if (it.k === "OT" || it.ot) { toast("La orden ya está registrada (OT " + ((it.ot && it.ot.NUMERO_OT) || it.id) + ").", "ok"); return; }
   const key = it.k + ":" + it.id; marcarVisto(it.id);
   if (it.k === "PROG") nuevaOT(it.e || { SERIE: it.p.SERIE, ID_CLIENTE: it.p.ID_CLIENTE }, it.p.TIPO_MANTENIMIENTO, { clase: "PROGRAMADA", visita: it.p, segKey: key });
   else nuevaOT(it.e || { SERIE: it.s.serie, ID_CLIENTE: it.s.id_cliente }, it.s.tipo_mantenimiento, { clase: it.s.clase, sol: it.s, segKey: key });
@@ -2402,6 +2431,7 @@ function abrirSeg(it) {
     anotarSeg(key, it.serie, "ETAPA", b.dataset.e); abrirSeg(it); pintarHoy(); toast("Etapa: " + etapaTxt(b.dataset.e), "ok");
   });
   $("#seg-texto").value = ""; $("#seg-archivos-info").textContent = ""; if ($("#seg-visible")) $("#seg-visible").checked = true;
+  if ($("#seg-atender")) $("#seg-atender").style.display = (it.ot || it.k === "OT") ? "none" : "";   // OT ya guardada: no se vuelve a llenar
   const log = [].concat(sg.ev.map(x => ({ t: x.t, h: etapaTxt(x.e) })), sg.av.map(x => ({ t: x.t, h: "Avance parcial" + (x.n ? " · 📎" + x.n : ""), d: x.texto })),
     lotesDe(key, sg.numero_ot).map(L => ({ t: L.t, h: "📲 " + (ENV_TIPO[L.tipo] || L.tipo) + " · abiertos " + loteResumen(L), d: lotePend(L).length ? "Pendientes: " + lotePend(L).map(d => d.nombre).join(", ") : "" }))).sort((a, b) => b.t.localeCompare(a.t));
   $("#seg-log").innerHTML = log.length ? log.map(x => `<li class="tl-item"><div class="tl-date">${ESC(hhmm(x.t))} · ${ESC(x.h)}</div>${x.d ? `<div class="tl-acts">${ESC(x.d)}</div>` : ""}</li>`).join("") : `<li class="hint">Aún sin registros.</li>`;
@@ -2711,7 +2741,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.60";
+const APP_VERSION = "v3.61";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();

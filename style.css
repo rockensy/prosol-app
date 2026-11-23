@@ -509,3 +509,5 @@ body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-
 .hc-asig { font-size: 13px; margin-top: 4px; color: #2C3E50; }
 .hc-asig.mia { color: #1E8449; }
 .hc-asig.sin { color: #A04000; }
+/* v3.61: acciones en Programaciones */
+.prog-acc .btn{flex:1;padding:7px 8px;font-size:.78rem;min-height:0;line-height:1.15;white-space:normal}
