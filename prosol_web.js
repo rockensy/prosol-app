@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.57</strong>
+        <strong>Versión PROSOL v3.58</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.57';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.58';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.57</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.58</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2350,6 +2350,13 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
       if(existentes && existentes.length){
         // Ya existe → actualizar la primera, no crear otra
         const idExist=existentes[0].id;
+        // v3.58: al editar, las fotos que la orden ya tenía se conservan; las nuevas se agregan (antes se reemplazaban)
+        if(row.hasOwnProperty('ot_fotos')){
+          let prev=existentes[0].ot_fotos; if(typeof prev==='string'){ try{prev=JSON.parse(prev);}catch(e){prev=[];} }
+          prev=Array.isArray(prev)?prev:[];
+          const ya=new Set(prev.map(f=>f&&f.data_url));
+          row.ot_fotos=prev.concat(fotosGuardar.filter(f=>!ya.has(f.data_url)));
+        }
         await _guardarConReintento(()=>API.update('ordenes',idExist,row));
         nuevaOT=[{id:idExist}];
         // Limpiar actividades previas para no duplicarlas
