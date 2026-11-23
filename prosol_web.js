@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.54</strong>
+        <strong>Versión PROSOL v3.55</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.54';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.55';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.54</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.55</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -1958,6 +1958,7 @@ function _editarUsuario(id, lista){
     <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Perfil</label>
     <select class="inp-web" id="uu_per">
       <option ${(!u||u.perfil==='ADMIN')?'selected':''}>ADMIN</option>
+      <option ${u&&u.perfil==='VENDEDOR'?'selected':''}>VENDEDOR</option>
       <option ${u&&u.perfil==='TECNICO'?'selected':''}>TECNICO</option>
       <option ${u&&u.perfil==='OPERADOR'?'selected':''}>OPERADOR</option>
     </select>
