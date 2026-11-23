@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.61</strong>
+        <strong>Versión PROSOL v3.62</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.61';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.62';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.61</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.62</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -1931,10 +1931,12 @@ VIEWS.config = async ()=>{
     }
     try{
       const usrs=API.hayNube() ? await AUTH.listarUsuariosNube() : await API.select('usuarios').catch(()=>[]);
+      _usrsCache=usrs;
       $id('cfgUsuarios').innerHTML=usrs.length
-        ? tabla(['Usuario','Nombre','Perfil','Estado',''],
+        ? tabla(['Usuario','Nombre','Perfil','Estado','Técnico vinculado',''],
             usrs.map(u=>[ESC(u.usuario||'—'),ESC(u.nombre||'—'),ESC(u.perfil||'—'),
               `<span style="color:${u.estado==='ACTIVO'?'#27AE60':'#E74C3C'};font-weight:700">${ESC(u.estado||'—')}</span>`,
+              ESC(u.id_tecnico||'—'),
               `<button class="btn-web mini sec" data-uid="${u.id}">✎ Editar</button>`]))
         : '<p style="color:#888;font-size:13px">Sin usuarios. Agrega uno.</p>';
       $id('cfgUsuarios').querySelectorAll('[data-uid]').forEach(b=>
@@ -1943,16 +1945,24 @@ VIEWS.config = async ()=>{
   }
   cargarUsuarios();
 
-  $id('btnNuevoUsr').addEventListener('click',()=>{ if(API.hayNube() && !AUTH.credAdmin()){ toast('🔒 Primero confirma tu contraseña de administrador (en Usuarios del sistema)'); const i=$id('cfgAdmPwd'); if(i) i.focus(); return; } _editarUsuario(null,[]); });
+  $id('btnNuevoUsr').addEventListener('click',()=>{ if(API.hayNube() && !AUTH.credAdmin()){ toast('🔒 Primero confirma tu contraseña de administrador (en Usuarios del sistema)'); const i=$id('cfgAdmPwd'); if(i) i.focus(); return; } _editarUsuario(null,_usrsCache||[]); });
 };
+let _usrsCache=[];
 
-function _editarUsuario(id, lista){
+async function _editarUsuario(id, lista){
   const u=id?lista.find(x=>x.id===id):null;
+  // v3.62: vínculo OPCIONAL con un técnico registrado (técnicos activos sin usuario + el ya vinculado)
+  const tecs=(await API.select('tecnicos').catch(()=>[]))||[];
+  const usados=new Set((lista||[]).filter(x=>x.id_tecnico && (!u || x.id!==u.id)).map(x=>x.id_tecnico));
+  const tecOpc=tecs.filter(t=>t.id_escritorio && !/INACTIV|ARCHIV/i.test(t.estado||'') && !usados.has(t.id_escritorio))
+    .map(t=>({id:t.id_escritorio, nom:[t.nombres,t.apellidos].filter(Boolean).join(' ')})).sort((a,b)=>a.nom.localeCompare(b.nom));
   modal(`<h3>${u?'Editar':'Nuevo'} usuario</h3>
     <label style="display:block;font-size:12px;font-weight:700;margin-bottom:4px">Usuario (login)</label>
     <input class="inp-web" id="uu_usr" value="${ESC(u?u.usuario||'':'')}" placeholder="ej. admin">
     <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Nombre completo</label>
     <input class="inp-web" id="uu_nom" value="${ESC(u?u.nombre||'':'')}">
+    <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Vincular con técnico (opcional)</label>
+    <select class="inp-web" id="uu_tec"><option value="">(ninguno)</option>${tecOpc.map(t=>`<option value="${ESC(t.id)}" data-nom="${ESC(t.nom)}" ${u&&u.id_tecnico===t.id?'selected':''}>${ESC(t.id)} · ${ESC(t.nom)}</option>`).join('')}</select>
     <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Nueva contraseña</label>
     <input class="inp-web" id="uu_pwd" type="password" placeholder="${u?'Dejar vacío para no cambiar':'Contraseña nueva'}">
     <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Perfil</label>
@@ -1972,12 +1982,14 @@ function _editarUsuario(id, lista){
       <button class="btn-web prim" id="uuGuardar">Guardar</button>
     </div>`);
   $id('uuCerrar').addEventListener('click',cerrarModal);
+  $id('uu_tec').addEventListener('change',()=>{ const o=$id('uu_tec').selectedOptions[0];
+    if(o&&o.value){ if(!$id('uu_nom').value.trim()) $id('uu_nom').value=o.dataset.nom||''; if(!u) $id('uu_per').value='TECNICO'; } });
   $id('uuGuardar').addEventListener('click',async()=>{
     const usr=$id('uu_usr').value.trim();
     const nom=$id('uu_nom').value.trim();
     const pwd=$id('uu_pwd').value;
     if(!usr){toast('⚠ El nombre de usuario es obligatorio');return;}
-    const row={usuario:usr,nombre:nom,perfil:$id('uu_per').value,estado:$id('uu_est').value};
+    const row={usuario:usr,nombre:nom,perfil:$id('uu_per').value,estado:$id('uu_est').value,id_tecnico:$id('uu_tec').value||''};
     // v3.53: en la nube se guarda con la función del servidor (valida al administrador, sal aleatoria por usuario)
     if(API.hayNube()){
       if(!u && !pwd){toast('⚠ La contraseña es obligatoria para un usuario nuevo');return;}

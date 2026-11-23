@@ -2531,7 +2531,8 @@ function wire() {
     $("#login-clave").value = "";
     estado.usuarioIngreso = usr;
     try { localStorage.setItem("prosol_usuario_ingreso", usr); } catch (e) {}
-    const n = tecnicoDeUsuario(u.nombre || usr);
+    const reg = usuariosIngreso().find(x => x.usuario === usr) || {};
+    const n = tecnicoDeUsuario(u.nombre || reg.nombre || usr, u.id_tecnico || reg.id_tecnico);
     estado.tecnico = n;
     // cargar órdenes y envíos guardados de ESTE técnico
     estado.ordenes = (await DB.get("ordenes::" + n)) || [];
@@ -2700,7 +2701,9 @@ async function sha256Hex(t) {
 }
 function _normN(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(w => w.length > 2); }
 // Técnico del catálogo que corresponde al usuario (para OT, asignaciones y liquidación)
-function tecnicoDeUsuario(nombreUsuario) {
+function tecnicoDeUsuario(nombreUsuario, idTecnico) {
+  // v3.62: primero el técnico VINCULADO al usuario (exacto); si no tiene, se busca por nombre
+  if (idTecnico) { const t = (estado.catalogo?.tecnicos || []).find(x => String(x.ID_TECNICO) === String(idTecnico)); if (t) return nombreTecnico(t); }
   const pu = new Set(_normN(nombreUsuario)); let mejor = null, pts = 0;
   (estado.catalogo?.tecnicos || []).forEach(t => {
     const n = nombreTecnico(t), c = _normN(n).filter(w => pu.has(w)).length;
@@ -2741,7 +2744,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.61";
+const APP_VERSION = "v3.62";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
