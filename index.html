@@ -49,7 +49,7 @@
 <!-- Barra de estado de sincronización (signature, siempre visible) -->
 <header id="syncbar" class="syncbar">
   <div class="syncbar-left">
-    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.53</span>
+    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.54</span>
   </div>
   <div class="syncbar-right">
     <button id="chip-catalogo" class="chip" data-go="oficina">
@@ -560,6 +560,18 @@
     <button class="btn btn-primary btn-block" id="gd-whatsapp" style="margin-top:12px">📲 Enviar por WhatsApp (grupo técnico, cliente, otros)</button>
     <button class="btn btn-ghost btn-block" id="gd-reintentar" style="margin-top:8px" hidden>☁ Reintentar envío a oficina</button>
     <button class="btn btn-ghost btn-block" id="gd-listo" style="margin-top:8px">Listo</button>
+  </div>
+</div>
+
+<!-- Hoja: asignar técnico a una visita (M8, solo supervisor) -->
+<div class="sheet" id="sheet-asig" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>👷 Asignar técnico</h2>
+      <button class="sheet-close" id="asig-cerrar">✕</button>
+    </div>
+    <p class="row-sub" id="asig-sub" style="white-space:normal;margin:0 0 6px"></p>
+    <div id="asig-lista" style="overflow:auto"></div>
   </div>
 </div>
 

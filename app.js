@@ -90,6 +90,7 @@ async function cargarLocal() {
   estado.tecnico = (await DB.get("tecnico")) || "";
   estado.catalogo = (await DB.get("catalogo")) || null;
   estado.solicitudes = (await DB.get("solicitudes")) || [];
+  estado.asig = (await DB.get("asig")) || {};   // M8: asignación de técnicos por visita (clave PROG:/SOL:)
   estado.contactos = (await DB.get("contactos_wa")) || [];
   const t = estado.tecnico;
   estado.seguim = t ? ((await DB.get("seguim::" + t)) || {}) : [];
@@ -180,7 +181,7 @@ function ir(nombre, porAtras) {
   if (nombre === "enviar") { pintarPendientes(); if (window._prosolRenderEnvio) window._prosolRenderEnvio(); }
   if (nombre === "historial") pintarHistorial();
   if (nombre === "oficina" || nombre === "inicio") pintarInicio();
-  if (nombre === "hoy") { pintarHoy(); syncSolicitudes(); }
+  if (nombre === "hoy") { pintarHoy(); syncSolicitudes(); syncAsignaciones(); }
 }
 
 // ---------- Sincronización visual ----------
@@ -600,7 +601,7 @@ function pintarProgramaciones() {
     li.innerHTML = `<span class="tw-c1">${p.FECHA_PROGRAMADA || "—"}</span>
       <span class="tw-c2">
         <div class="t2-main">${p.TIPO_MANTENIMIENTO || "Mantenimiento"}</div>
-        <div class="t2-sub">Serie ${p.SERIE || "—"} · ${cli?.RAZON_SOCIAL || "—"}</div>
+        <div class="t2-sub">Serie ${p.SERIE || "—"} · ${cli?.RAZON_SOCIAL || "—"}${(() => { const a = (estado.asig || {})["PROG:" + (p.ID_VISITA || p.ID_SB)]; return a && a.tecnico ? " · 👷 " + ESC(a.tecnico) : ""; })()}</div>
       </span>`;
     li.onclick = () => {
       const eq = (estado.catalogo.equipos || []).find(e => e.SERIE === p.SERIE);
@@ -1367,6 +1368,67 @@ function datosTarjeta(serie, idCliente, nombreCli) {
   const e = equipoPorSerie(serie), cli = clientePorId(e ? e.ID_CLIENTE : idCliente);
   return { e, equipo: e ? tituloEquipo(e) : "Equipo " + serie, cliente: cli?.RAZON_SOCIAL || nombreCli || "—" };
 }
+// ---- M8: asignación de técnicos (la hace el supervisor) y filtro «Todas / Mías» ----
+const claveAsig = (it) => it.k + ":" + it.id;
+const fechaItem = (it) => it.fecha || (it.p && it.p.FECHA_PROGRAMADA) || (it.s && it.s.fecha_prevista) || "";
+function asigDe(it) { return (estado.asig || {})[claveAsig(it)] || null; }
+function tecnicoAsignado(it) { const a = asigDe(it); return a && a.tecnico ? a.tecnico : ""; }
+const asignable = (it) => it.k === "PROG" || (it.k === "SOL" && UUID_RE.test(String(it.id)) && it.s && it.s.estado === "AUTORIZADA");
+// por defecto: el supervisor ve «Todas»; el técnico ve «Mías» solo si tiene visitas asignadas (si no, «Todas»,
+// para que nadie quede con Hoy vacío mientras el supervisor no asigna). La elección manual se recuerda.
+function filtroHoy(nMias) {
+  try { const f = localStorage.getItem("prosol_filtro_hoy::" + estado.tecnico); if (f === "MIAS" || f === "TODAS") return f; } catch (e) {}
+  return esSup() ? "TODAS" : (nMias > 0 ? "MIAS" : "TODAS");
+}
+function setFiltroHoy(f) { try { localStorage.setItem("prosol_filtro_hoy::" + estado.tecnico, f); } catch (e) {} pintarHoy(); }
+let _asigBusy = false, _asigTs = 0;
+async function syncAsignaciones(forzar) {
+  if (typeof API === "undefined" || !API.hayNube() || !navigator.onLine || _asigBusy) return;
+  if (!forzar && Date.now() - _asigTs < 15000) return;
+  _asigBusy = true;
+  try {
+    const filas = await API.select("visitas_asignacion");
+    if (Array.isArray(filas)) {
+      const m = {};
+      filas.forEach(r => { m[r.clave] = { tecnico: r.tecnico || "", por: r.asignado_por || "", ts: r.actualizado || "", id_sb: r.id }; });
+      const antes = JSON.stringify(estado.asig || {});
+      estado.asig = m; await DB.set("asig", m);
+      if (antes !== JSON.stringify(m) && estado._pantalla === "hoy") pintarHoy();
+    }
+    _asigTs = Date.now();
+  } catch (e) { /* sin red: se usa lo guardado */ } finally { _asigBusy = false; }
+}
+async function guardarAsignacion(it, tecnico) {
+  if (typeof API === "undefined" || !API.hayNube()) { toast("Configura la conexión a la nube para asignar técnicos.", "warn"); return false; }
+  if (!navigator.onLine) { toast("Sin internet: no se pudo asignar. Intenta cuando tengas señal.", "warn"); return false; }
+  const clave = claveAsig(it);
+  const fila = { clave, serie: it.serie || null, fecha: fechaItem(it) || null, tecnico: tecnico || null, asignado_por: estado.tecnico, actualizado: new Date().toISOString() };
+  try {
+    const ya = await API.select("visitas_asignacion", { clave });
+    if (ya && ya.length) await API.update("visitas_asignacion", ya[0].id, fila);
+    else await API.insert("visitas_asignacion", fila);
+    estado.asig = estado.asig || {};
+    estado.asig[clave] = { tecnico: tecnico || "", por: estado.tecnico, ts: fila.actualizado };
+    await DB.set("asig", estado.asig);
+    return true;
+  } catch (e) { toast("No se pudo asignar: " + e.message, "warn"); return false; }
+}
+function abrirAsignar(it) {
+  const tecs = (estado.catalogo?.tecnicos || []).filter(t => !/INACTIV/i.test(t.ESTADO || "")).map(nombreTecnico).filter(Boolean);
+  const actual = tecnicoAsignado(it);
+  $("#asig-sub").textContent = it.cliente + " · Serie " + it.serie + " · " + (fechaItem(it) ? fmtFecha(fechaItem(it)) : "Sin fecha");
+  $("#asig-lista").innerHTML = tecs.map(n => `<button class="btn ${n === actual ? "btn-primary" : "btn-ghost"} btn-block asig-tec" data-t="${ESC(n)}" style="margin-top:6px">👷 ${ESC(n)}${n === actual ? " · asignado" : ""}</button>`).join("")
+    + (actual ? `<button class="btn btn-ghost btn-block asig-tec" data-t="" style="margin-top:12px">✕ Quitar asignación</button>` : "")
+    + (tecs.length ? "" : `<p class="hint">No hay técnicos en el catálogo. Sincroniza el catálogo.</p>`);
+  $$("#asig-lista .asig-tec").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const okA = await guardarAsignacion(it, b.dataset.t);
+    b.disabled = false;
+    if (okA) { $("#sheet-asig").hidden = true; toast(b.dataset.t ? "Visita asignada a " + b.dataset.t : "Asignación quitada", "ok"); pintarHoy(); }
+  });
+  $("#sheet-asig").hidden = false;
+}
+
 function agendaHoy() {
   const hoy = hoyISO(), yo = estado.tecnico, sup = esSup();
   const a = { porAutorizar: [], urgentes: [], pendientes: [], rechazadas: [], hoy: [], vencidas: [], proximas: [] };
@@ -1392,6 +1454,12 @@ function agendaHoy() {
   });
   const orden = (x, y) => (x.fecha || "").localeCompare(y.fecha || "");
   ["hoy", "vencidas", "proximas"].forEach(g => a[g].sort(orden));
+  // M8: cuántas son «mías» y filtro (no afecta autorizaciones, pendientes ni rechazadas)
+  const VIS = ["urgentes", "hoy", "vencidas", "proximas"];
+  a.nTodas = VIS.reduce((n, g) => n + a[g].length, 0);
+  a.nMias = VIS.reduce((n, g) => n + a[g].filter(it => tecnicoAsignado(it) === yo).length, 0);
+  a.filtro = filtroHoy(a.nMias);
+  if (a.filtro === "MIAS") VIS.forEach(g => { a[g] = a[g].filter(it => tecnicoAsignado(it) === yo || (it.k === "SOL" && it.s && it.s.solicitante === yo && !tecnicoAsignado(it))); });
   return a;
 }
 function badgesTarjeta(it, yo) {
@@ -1411,12 +1479,14 @@ function tarjetaHoy(it, modo) {
   if (modo === "aut") acc.push('<button class="btn btn-primary" data-acc="autorizar">✔ Autorizar</button>', '<button class="btn btn-ghost" data-acc="rechazar">✕ Rechazar</button>');
   else if (modo === "rech") acc.push('<button class="btn btn-ghost" data-acc="entendido">Entendido</button>');
   else if (modo !== "pen") acc.push('<button class="btn btn-primary" data-acc="atender">Atender</button>', '<button class="btn btn-ghost" data-acc="seguir">Seguimiento</button>');
+  if (esSup() && asignable(it) && ["hoy", "venc", "prox", "urg"].includes(modo)) acc.push('<button class="btn btn-ghost" data-acc="asignar">👷 Asignar</button>');
   const fecha = it.fecha ? fmtFecha(it.fecha) : "Sin fecha";
   return `<div class="hcard ${modo}" data-k="${it.k}" data-id="${ESC(it.id)}">
     <div class="hc-top"><span class="hc-fecha">${ESC(fecha)}</span>${badgesTarjeta(it, yo)}${(() => { const sg = (estado.seguim || {})[it.k + ":" + it.id]; return sg && sg.etapa !== "PROGRAMADA" ? '<span class="hb et">' + etapaTxt(sg.etapa) + "</span>" : ""; })()}</div>
     <div class="hc-main">${ESC(it.cliente)}</div>
     <div class="hc-sub">Serie ${ESC(it.serie)} · ${ESC(it.equipo)}</div>
     <div class="hc-sub">${ESC(it.tipoMant)}</div>
+    ${asignable(it) ? (tecnicoAsignado(it) ? `<div class="hc-asig${tecnicoAsignado(it) === yo ? " mia" : ""}">👷 Asignada a <b>${ESC(tecnicoAsignado(it))}</b>${tecnicoAsignado(it) === yo ? " (tú)" : ""}</div>` : `<div class="hc-asig sin">👷 Sin técnico asignado</div>`) : ""}
     ${it.e ? sitioHTML(it.e, true) : ""}
     ${s && s.motivo ? `<div class="hc-motivo">“${ESC(s.motivo)}”</div>` : ""}
     ${s && modo === "aut" ? `<div class="hc-sub">Pide: ${ESC(s.solicitante)}</div>` : ""}
@@ -1435,7 +1505,9 @@ function pintarHoy() {
   const a = agendaHoy();
   const sec = (titulo, arr, modo, cls) => arr.length
     ? `<h2 class="hoy-h ${cls}">${titulo} <span>${arr.length}</span></h2>` + arr.map(i => tarjetaHoy(i, modo)).join("") : "";
-  let h = "";
+  let h = `<div class="hoy-filtro" role="tablist">
+    <button class="hf-chip${a.filtro === "MIAS" ? " on" : ""}" data-filtro="MIAS">Mías <span>${a.nMias}</span></button>
+    <button class="hf-chip${a.filtro === "TODAS" ? " on" : ""}" data-filtro="TODAS">Todas <span>${a.nTodas}</span></button></div>`;
   h += sec("Por autorizar", a.porAutorizar, "aut", "aut");
   h += sec("🚨 Urgentes", a.urgentes, "urg", "urg");
   h += sec("Esperando autorización", a.pendientes, "pen", "");
@@ -1443,8 +1515,11 @@ function pintarHoy() {
   h += sec("Para hoy", a.hoy, "hoy", "");
   h += sec("Vencidas", a.vencidas, "venc", "venc");
   if (a.proximas.length) h += `<details class="hoy-prox"><summary>Próximas <span>${a.proximas.length}</span></summary>${a.proximas.map(i => tarjetaHoy(i, "prox")).join("")}</details>`;
-  if (!h) h = `<p class="hint">No tienes visitas pendientes. Si surge algo, usa el botón ＋.</p>`;
+  if (!/hcard/.test(h)) h += a.filtro === "MIAS" && a.nTodas
+    ? `<p class="hint">No tienes visitas asignadas. Toca <b>Todas</b> para ver las ${a.nTodas} visita(s) del equipo.</p>`
+    : `<p class="hint">No tienes visitas pendientes. Si surge algo, usa el botón ＋.</p>`;
   cont.innerHTML = h;
+  $$("#hoy-contenido .hf-chip").forEach(b => b.onclick = () => setFiltroHoy(b.dataset.filtro));
   autoActualizarCatalogo();
   refrescarSync();
 }
@@ -1455,6 +1530,7 @@ async function accionHoy(ev) {
   const it = itemDeTarjeta(k, id); if (!it) return;
   if (acc === "atender") { atenderItem(it); return; }
   if (acc === "seguir") { marcarVisto(id); abrirSeg(it); return; }
+  if (acc === "asignar") { abrirAsignar(it); return; }
   const s = it.s; if (!s) return;
   if (acc === "autorizar" || acc === "rechazar") { await resolverSolicitud(s, acc === "autorizar" ? "AUTORIZADA" : "RECHAZADA"); return; }
   if (acc === "entendido") { const v = leerVistos(); v.rech = v.rech || {}; v.rech[s.id] = 1; guardarVistos(v); pintarHoy(); return; }
@@ -1644,6 +1720,7 @@ function mostrarHoyFlotante() {
   add("por autorizar", a.porAutorizar.length, "aut"); add("urgentes", a.urgentes.length, "urg");
   add("para hoy", a.hoy.length, ""); add("vencidas", a.vencidas.length, "venc"); add("próximas", a.proximas.length, "");
   if (!filas.length) return;
+  if (a.filtro === "MIAS") filas.unshift(`<div class="hf-fila"><small>Tus visitas asignadas (${a.nMias} de ${a.nTodas}). En Hoy puedes ver «Todas».</small></div>`);
   const top = [].concat(a.urgentes, a.porAutorizar, a.hoy, a.vencidas).slice(0, 4).map(i =>
     `<div class="hf-item"><b>${ESC(i.cliente)}</b><span>Serie ${ESC(i.serie)} · ${ESC(i.tipoMant)}</span></div>`).join("");
   $("#hf-fecha").textContent = fmtFecha(hoyISO());
@@ -2438,6 +2515,7 @@ function wire() {
   $("#gd-whatsapp").onclick = enviarGuardadaWhatsApp;
   $("#gd-reintentar").onclick = () => { if (window._prosolSubirPendientes) Promise.resolve(window._prosolSubirPendientes()).then(() => estado._gdPinta && estado._gdPinta()); };
   $("#gd-listo").onclick = $("#gd-cerrar").onclick = () => { $("#sheet-guardada").hidden = true; estado._guardada = null; };
+  $("#asig-cerrar").onclick = () => { $("#sheet-asig").hidden = true; };
   if ($("#btn-orden-confirmar")) $("#btn-orden-confirmar").onclick = toggleConfirmada;
   $("#btn-ot-desde-eq").onclick = () => abrirNuevaVisita(estado._equipoActual);
   if ($("#sheet-eq-edit-close")) $("#sheet-eq-edit-close").onclick = () => $("#sheet-eq-edit").hidden = true;
@@ -2449,6 +2527,7 @@ function wire() {
   if ($("#btn-nv-crear")) $("#btn-nv-crear").onclick = crearVisitaNV;
   $$('input[name="nv-clase"]').forEach(r => r.addEventListener("change", actualizarBotonNV));
   window.addEventListener("online", () => syncSolicitudes(true));
+  window.addEventListener("online", () => syncAsignaciones(true));
   if ($("#btn-ubicacion")) $("#btn-ubicacion").onclick = () => capturarUbicacion();
   $("#btn-elegir-equipo").onclick = () => abrirSheetEquipo(setEquipoOT);
   if ($("#btn-qr-equipo")) $("#btn-qr-equipo").onclick = () => abrirEscanerQR(setEquipoOT);
@@ -2555,7 +2634,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.53";
+const APP_VERSION = "v3.54";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();

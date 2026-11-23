@@ -499,3 +499,13 @@ body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-
 .env-d.env-pendiente{color:#7E5109;font-weight:700}
 .env-d.env-abierto,.env-d.env-compartido{color:#1E6B3A}
 .env-est{font-weight:800}
+
+/* M8: asignación de técnicos y filtro «Todas / Mías» */
+.hoy-filtro { display: flex; gap: 8px; margin: 2px 0 10px; }
+.hf-chip { flex: 1; border: 1.5px solid #D5DBE1; background: #fff; color: #1C2733; border-radius: 999px; padding: 8px 10px; font-weight: 700; font-size: 14px; cursor: pointer; }
+.hf-chip span { display: inline-block; min-width: 20px; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #EEF1F4; font-size: 12px; }
+.hf-chip.on { background: #F5A623; border-color: #F5A623; }
+.hf-chip.on span { background: rgba(255,255,255,.6); }
+.hc-asig { font-size: 13px; margin-top: 4px; color: #2C3E50; }
+.hc-asig.mia { color: #1E8449; }
+.hc-asig.sin { color: #A04000; }
