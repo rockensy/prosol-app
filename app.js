@@ -2466,8 +2466,16 @@ function wire() {
     const c = (estado.contactos || []).find(x => String(x.id) === r.dataset.id); if (c) abrirContacto(c);
   });
   $("#btn-entrar").onclick = async () => {
-    const n = ($("#login-tecnico").value || "").trim();
-    if (!n) { toast("Elige tu nombre de la lista.", "err"); return; }
+    const usr = ($("#login-tecnico").value || "").trim(), clave = $("#login-clave").value || "";
+    if (!usr) { toast("Elige tu usuario de la lista.", "err"); return; }
+    if (!clave) { toast("Escribe tu contraseña.", "err"); return; }
+    let u;
+    try { u = await verificarIngreso(usr, clave); } catch (e) { toast(e.message, "err"); return; }
+    if (!u) { toast("Usuario o contraseña incorrectos.", "err"); return; }
+    $("#login-clave").value = "";
+    estado.usuarioIngreso = usr;
+    try { localStorage.setItem("prosol_usuario_ingreso", usr); } catch (e) {}
+    const n = tecnicoDeUsuario(u.nombre || usr);
     estado.tecnico = n;
     // cargar órdenes y envíos guardados de ESTE técnico
     estado.ordenes = (await DB.get("ordenes::" + n)) || [];
@@ -2600,23 +2608,65 @@ function pintarLogin() {
   if (vtag) vtag.textContent = "PROSOL Campo " + APP_VERSION;
   if (!hayCat) return;
   // llenar combo con técnicos del catálogo
+  // v3.57: el ingreso lista los USUARIOS del sistema (iguales en escritorio, web y celular), no los técnicos
   const sel = $("#login-tecnico"); sel.innerHTML = "";
-  const tecnicos = (estado.catalogo.tecnicos || []).map(nombreTecnico)
-    .filter(Boolean).sort((a, b) => a.localeCompare(b));
-  if (!tecnicos.length) {
+  const tecnicos = (estado.catalogo.tecnicos || []).map(nombreTecnico).filter(Boolean);
+  const usuarios = usuariosIngreso();
+  if (!usuarios.length) {
     const o = document.createElement("option");
-    o.value = ""; o.textContent = "(El catálogo no trae técnicos)"; sel.appendChild(o);
+    o.value = ""; o.textContent = "(Conéctate a internet para cargar los usuarios)"; sel.appendChild(o);
   } else {
     const ph = document.createElement("option");
-    ph.value = ""; ph.textContent = "— Elige tu nombre —"; sel.appendChild(ph);
-    tecnicos.forEach(n => {
-      const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
+    ph.value = ""; ph.textContent = "— Elige tu usuario —"; sel.appendChild(ph);
+    usuarios.forEach(u => {
+      const o = document.createElement("option"); o.value = u.usuario; o.textContent = u.nombre || u.usuario; sel.appendChild(o);
     });
-    if (estado.tecnico && tecnicos.includes(estado.tecnico)) sel.value = estado.tecnico;
+    if (estado.usuarioIngreso && usuarios.some(u => u.usuario === estado.usuarioIngreso)) sel.value = estado.usuarioIngreso;
   }
   const r = estado.catalogo.resumen || {};
   $("#login-cat-info").textContent =
-    `Catálogo del ${(estado.catalogo.generado || "").slice(0,10)} · ${tecnicos.length} técnico(s).`;
+    `Catálogo del ${(estado.catalogo.generado || "").slice(0,10)} · ${usuarios.length} usuario(s).`;
+}
+
+// ---------- v3.57: usuarios del sistema para el ingreso del celular ----------
+const LS_USR_ING = "prosol_usuarios_ingreso", LS_CRED_ING = "prosol_cred_ingreso";
+function usuariosIngreso() { try { return JSON.parse(localStorage.getItem(LS_USR_ING) || "[]") || []; } catch (e) { return []; } }
+async function cargarUsuariosIngreso() {
+  if (typeof API === "undefined" || !API.hayNube() || !navigator.onLine) return;
+  try {
+    const l = await API.rpc("pwa_usuarios_ingreso", {});
+    if (Array.isArray(l)) { localStorage.setItem(LS_USR_ING, JSON.stringify(l)); pintarLogin(); }
+  } catch (e) { console.warn("usuarios ingreso:", e); }
+}
+async function sha256Hex(t) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+  return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, "0")).join("");
+}
+function _normN(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(w => w.length > 2); }
+// Técnico del catálogo que corresponde al usuario (para OT, asignaciones y liquidación)
+function tecnicoDeUsuario(nombreUsuario) {
+  const pu = new Set(_normN(nombreUsuario)); let mejor = null, pts = 0;
+  (estado.catalogo?.tecnicos || []).forEach(t => {
+    const n = nombreTecnico(t), c = _normN(n).filter(w => pu.has(w)).length;
+    if (c > pts) { pts = c; mejor = n; }
+  });
+  return pts >= 2 ? mejor : (nombreUsuario || "");
+}
+// Verifica la contraseña en la nube (misma función que la web); sin internet, con la última verificación de este celular
+async function verificarIngreso(usuario, clave) {
+  let cred = {}; try { cred = JSON.parse(localStorage.getItem(LS_CRED_ING) || "{}") || {}; } catch (e) {}
+  if (typeof API !== "undefined" && API.hayNube() && navigator.onLine) {
+    const salt = await API.rpc("pwa_salt", { p_usuario: usuario });
+    if (!salt) return null;
+    const h = await sha256Hex(salt + ":" + clave);
+    const u = await API.rpc("pwa_login", { p_usuario: usuario, p_hash: h });
+    if (!u) return null;
+    cred[usuario] = { salt: salt, h: h }; localStorage.setItem(LS_CRED_ING, JSON.stringify(cred));
+    return u;
+  }
+  const c = cred[usuario];
+  if (c && (await sha256Hex(c.salt + ":" + clave)) === c.h) return (usuariosIngreso().find(x => x.usuario === usuario) || { usuario: usuario });
+  throw new Error("Sin internet: este usuario aún no ha ingresado en este celular.");
 }
 
 // ---------- Abrir archivo con la app (file_handlers / launchQueue) ----------
@@ -2635,7 +2685,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.56";
+const APP_VERSION = "v3.57";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2692,6 +2742,7 @@ if (window.innerWidth < 700) {
     try { initSupabase(); } catch(e) { console.error('initSupabase:', e); }
     // v3.55: al abrir la app (también en la pantalla de ingreso) baja técnicos, equipos y visitas de la nube
     try { autoActualizarCatalogo(); } catch(e) { console.error('autoCat:', e); }
+    try { estado.usuarioIngreso = localStorage.getItem("prosol_usuario_ingreso") || ""; cargarUsuariosIngreso(); } catch(e) {}
   }).catch(e => { console.error('init:', e); });
 }
 // Exponer funciones internas para que initSupabase (fuera de IIFE) pueda usarlas

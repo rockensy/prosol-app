@@ -49,7 +49,7 @@
 <!-- Barra de estado de sincronización (signature, siempre visible) -->
 <header id="syncbar" class="syncbar">
   <div class="syncbar-left">
-    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.56</span>
+    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.57</span>
   </div>
   <div class="syncbar-right">
     <button id="chip-catalogo" class="chip" data-go="oficina">
@@ -96,8 +96,11 @@
           <span class="field-label">¿Quién eres?</span>
           <select id="login-tecnico"></select>
         </label>
-        <p class="hint">Elige tu nombre de la lista de técnicos registrados en oficina.
-          Tus órdenes se asignarán a ti.</p>
+        <label class="field">
+          <span class="field-label">Contraseña</span>
+          <input id="login-clave" type="password" autocomplete="current-password" placeholder="Tu contraseña del sistema">
+        </label>
+        <p class="hint">Usuarios del sistema (los mismos del escritorio y la web). Tus órdenes se asignarán a ti.</p>
         <button class="btn btn-primary btn-block" id="btn-entrar">Entrar</button>
         <p class="hint center" id="login-cat-info" style="margin-top:12px"></p>
       </div>
