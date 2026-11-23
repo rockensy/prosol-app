@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1C2733">
+<title>Autorización de mantenimiento · PROSOL</title>
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root{--grafito:#1C2733;--ambar:#F5A623;--texto:#1A2530;--gris:#5D6D7E;--ok:#1E8449;--fondo:#EEF2F5}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--fondo);color:var(--texto)}
+  header{background:var(--grafito);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}
+  header img{width:42px;height:42px;border-radius:10px}
+  header h1{font-size:1.05rem;margin:0}
+  header p{margin:2px 0 0;font-size:.78rem;color:var(--ambar);font-weight:700;letter-spacing:.3px}
+  main{max-width:720px;margin:0 auto;padding:12px}
+  .card{background:#fff;border-radius:14px;padding:14px 16px;margin:0 0 12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .estado{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.1rem}
+  .estado .ic{font-size:1.6rem}
+  .chip{display:inline-block;border-radius:8px;padding:3px 9px;font-size:.75rem;font-weight:800}
+  .chip.curso{background:#FDEBD0;color:#7E5109}.chip.fin{background:#D5F5E3;color:#145A32}.chip.urg{background:#C0392B;color:#fff}
+  .dato{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #F0F2F4;font-size:.92rem}
+  .dato:last-child{border-bottom:0}.dato b{min-width:118px;color:var(--gris);font-weight:700}
+  h2{font-size:.82rem;text-transform:uppercase;letter-spacing:.6px;color:var(--gris);margin:0 0 10px}
+  .linea{list-style:none;margin:0;padding:0}
+  .linea li{display:flex;gap:12px;position:relative;padding:0 0 16px}
+  .linea li:last-child{padding-bottom:0}
+  .linea li:not(:last-child)::after{content:"";position:absolute;left:15px;top:32px;bottom:2px;width:2px;background:#E1E6EB}
+  .linea .p{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:#E9EDF1;flex:none;font-size:1rem}
+  .linea li.hecho .p{background:#D5F5E3}.linea li.actual .p{background:var(--ambar);box-shadow:0 0 0 4px #FCEBD0}
+  .linea .t{font-weight:800;font-size:.95rem}.linea .h{font-size:.8rem;color:var(--gris)}
+  .linea li.pend .t{color:#AAB4BE}
+  .av{border-left:3px solid var(--ambar);padding:6px 10px;margin:0 0 8px;background:#FFF9EF;border-radius:0 8px 8px 0;font-size:.9rem}
+  .av small{display:block;color:var(--gris);font-size:.75rem;margin-bottom:2px}
+  .acts{margin:0;padding:0;list-style:none;font-size:.92rem}
+  .acts li{padding:3px 0}.acts .r{font-weight:800;margin-top:6px}.acts .s{padding-left:18px}
+  .fotos{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .fotos img{width:100%;border-radius:10px;display:block;aspect-ratio:4/3;object-fit:cover}
+  .firma{max-width:260px;border:1px solid #E1E6EB;border-radius:8px;background:#fff}
+  .btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font-size:1rem;font-weight:800;background:var(--ambar);color:#1a1200;cursor:pointer}
+  .nota{font-size:.78rem;color:var(--gris)}
+  footer{text-align:center;font-size:.72rem;color:var(--gris);padding:16px 12px 28px}
+  .vacio{text-align:center;padding:40px 16px}
+  @media print{ body{background:#fff} header{-webkit-print-color-adjust:exact;print-color-adjust:exact} .noprint{display:none!important}
+    .card{box-shadow:none;border:1px solid #DDE3E8;break-inside:avoid} main{max-width:none} }
+  .opc{display:flex;flex-direction:column;gap:10px;margin:6px 0 10px}
+  .opc label{display:flex;align-items:center;gap:10px;border:2px solid #E1E6EB;border-radius:12px;padding:12px;font-weight:800;cursor:pointer}
+  .opc input{width:20px;height:20px}
+  .opc label.on{border-color:var(--ambar);background:#FFF9EF}
+  textarea,input[type=date]{width:100%;border:1px solid #D5DBE1;border-radius:10px;padding:10px;font:inherit}
+  .ok{background:#D5F5E3;color:#145A32;border-radius:12px;padding:12px;font-weight:800}
+  .err{background:#FADBD8;color:#78281F;border-radius:12px;padding:12px;font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <img src="icons/icon-192.png" alt="PROSOL">
+  <div><h1>PROSOL S.A. · Servicio Autorizado Generac</h1><p>AUTORIZACIÓN DE MANTENIMIENTO</p></div>
+</header>
+<main id="app"><div class="card vacio">Cargando…</div></main>
+<footer>Potenciado por ROCKENSY S.A. &amp; MIG — Tec. Master Luis Martínez Ibáñez</footer>
+<script src="autorizacion.js"></script>
+</body>
+</html>

@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.63</strong>
+        <strong>Versión PROSOL v3.64</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.63';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.64';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -388,7 +388,14 @@ VIEWS.solicitudes = async () => {
       </select>
       <button class="btn-web prim" id="solNueva">＋ Nueva visita autorizada</button>
     </div>
-    <div id="solForm"></div><div id="solLista">Cargando…</div></div>`;
+    <div id="solForm"></div><div id="solLista">Cargando…</div></div>
+    <div class="card"><h2>✍️ Autorizaciones de clientes (mensajes de Programación)</h2>
+      <div class="toolbar"><select id="autF" class="inp-web" style="max-width:260px">
+        <option value="">Todas</option><option value="SIN">Respondidas sin gestionar</option><option value="PEND">Pendientes de respuesta</option>
+        <option value="AUTORIZADO">Autorizó</option><option value="NO_AUTORIZADO">No autorizó</option><option value="MAS_INFO">Pide más información</option>
+        <option value="GES">Gestionadas</option></select>
+        <button class="btn-web sec" id="autAct">🔄 Actualizar</button></div>
+      <div id="autLista">Cargando…</div></div>`;
   const [sol, eq, cli, acts] = await Promise.all([
     API.select('solicitudes_ot').catch(()=>[]), API.select('equipos').catch(()=>[]),
     API.select('clientes').catch(()=>[]), API.select('actividades').catch(()=>[])]);
@@ -444,7 +451,50 @@ VIEWS.solicitudes = async () => {
     });
   });
   pintar();
+  _autorizacionesWeb(quien);
 };
+
+// v3.64: respuestas de los clientes al enlace de autorización (las crea Programación del escritorio)
+async function _autorizacionesWeb(quien){
+  const TXT={PENDIENTE:'⏳ Pendiente',AUTORIZADO:'✅ Autorizó',NO_AUTORIZADO:'❌ No autorizó',MAS_INFO:'💬 Más información'};
+  const GES=['AGENDADA','RECHAZO REGISTRADO','INFORMACIÓN ENVIADA','SIN RESPUESTA','OTRO'];
+  const hora=(i)=>{ if(!i) return ''; const d=new Date(i); return isNaN(d)?'':d.toLocaleString('es-EC',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); };
+  let lista=[];
+  async function cargar(){
+    try{ lista=await API.rpc('autorizaciones_listar',{p_dias:120})||[]; pintar(); }
+    catch(e){ $id('autLista').innerHTML='<p style="color:#888;font-size:13px">No disponible: '+ESC(e.message)+'</p>'; }
+  }
+  function pintar(){
+    const f=$id('autF').value;
+    const v=lista.filter(a=>!f||(f==='SIN'?(a.respondido&&!a.gestion):f==='PEND'?!a.respondido:f==='GES'?!!a.gestion:a.estado===f));
+    $id('autLista').innerHTML=v.length?tabla(['Enviado','Cliente','Serie','Servicio','Respuesta','Fecha pref.','Comentario','Gestión',''],
+      v.map(a=>[ESC(hora(a.creado)),ESC(a.cliente||''),ESC(a.serie||''),ESC(a.servicio||''),
+        `<b style="color:${a.estado==='AUTORIZADO'?'#1E8449':a.estado==='NO_AUTORIZADO'?'#C0392B':a.estado==='MAS_INFO'?'#B9770E':'#888'}">${ESC(TXT[a.estado]||a.estado)}</b>${a.respondido?'<br><small>'+ESC(hora(a.respondido))+'</small>':''}`,
+        ESC(a.fecha_preferida||''),ESC(a.comentario||''),ESC(a.gestion?(a.gestion+(a.gestion_nota?' · '+a.gestion_nota:'')):''),
+        `<button class="btn-web mini prim" data-aut="${ESC(a.token)}">📝 Gestión</button>`]))
+      :'<p style="color:#888;font-size:13px">Sin solicitudes.</p>';
+    $id('autLista').querySelectorAll('[data-aut]').forEach(b=>b.addEventListener('click',()=>gestionar(lista.find(x=>x.token===b.dataset.aut))));
+  }
+  function gestionar(a){
+    if(!a) return;
+    const sug={AUTORIZADO:'AGENDADA',NO_AUTORIZADO:'RECHAZO REGISTRADO',MAS_INFO:'INFORMACIÓN ENVIADA'}[a.estado]||'OTRO';
+    modal(`<h3>Registrar gestión</h3><p style="margin:0 0 6px"><b>${ESC(a.cliente||'')}</b> · serie ${ESC(a.serie||'')}<br>Respuesta: ${ESC(TXT[a.estado]||a.estado)}${a.fecha_preferida?' · fecha preferida '+ESC(a.fecha_preferida):''}</p>
+      ${a.comentario?`<p style="font-size:13px;margin:0 0 8px">💬 ${ESC(a.comentario)}</p>`:''}
+      <label style="display:block;font-size:12px;font-weight:700;margin:6px 0 4px">Gestión</label>
+      <select class="inp-web" id="agG">${GES.map(g=>`<option ${((a.gestion||sug)===g)?'selected':''}>${g}</option>`).join('')}</select>
+      <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Nota</label>
+      <input class="inp-web" id="agN" value="${ESC(a.gestion_nota||'')}">
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end"><button class="btn-web sec" id="agC">Cancelar</button><button class="btn-web prim" id="agOk">Guardar</button></div>`);
+    $id('agC').addEventListener('click',cerrarModal);
+    $id('agOk').addEventListener('click',async()=>{
+      try{ await API.rpc('autorizacion_gestionar',{p_token:a.token,p_gestion:$id('agG').value,p_nota:$id('agN').value,p_por:quien()}); cerrarModal(); toast('✅ Gestión registrada'); cargar(); }
+      catch(e){ toast('❌ '+(e.message||e)); }
+    });
+  }
+  $id('autF').addEventListener('change',pintar);
+  $id('autAct').addEventListener('click',cargar);
+  cargar();
+}
 
 /* ── Órdenes ────────────────────────────────────────────────────────── */
 VIEWS.ordenes = async () => {
@@ -1871,7 +1921,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.63</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.64</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
