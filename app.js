@@ -1666,13 +1666,14 @@ function crearVisitaNV() {
 
 // Catálogo anterior a M9-B (sin roles ni vínculo de clientes): se baja de nuevo una vez.
 function autoActualizarCatalogo() {
-  if (!estado.catalogo || !navigator.onLine || autoActualizarCatalogo._ya
+  if (!navigator.onLine || autoActualizarCatalogo._ya
       || !window._prosolSincronizarCatalogoSupabase || typeof API === "undefined" || !API.hayNube()) return;
   autoActualizarCatalogo._ya = true;
   toast("Actualizando catálogo…", "");
   window._prosolSincronizarCatalogoSupabase().then(() => {
     const act = document.querySelector(".screen.active"); const n = act && act.dataset.screen;
     if (n === "equipos") pintarEquipos(); else if (n === "hoy") pintarHoy();
+    pintarLogin();
   });
 }
 
@@ -2634,7 +2635,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.55";
+const APP_VERSION = "v3.56";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2689,6 +2690,8 @@ if (window.innerWidth < 700) {
   init().then(() => {
     // Inicializar integración Supabase después del arranque
     try { initSupabase(); } catch(e) { console.error('initSupabase:', e); }
+    // v3.55: al abrir la app (también en la pantalla de ingreso) baja técnicos, equipos y visitas de la nube
+    try { autoActualizarCatalogo(); } catch(e) { console.error('autoCat:', e); }
   }).catch(e => { console.error('init:', e); });
 }
 // Exponer funciones internas para que initSupabase (fuera de IIFE) pueda usarlas
@@ -2926,7 +2929,7 @@ function initSupabase() {
         ACTIVIDADES: []
       }));
 
-      _e.catalogo.generado = new Date().toISOString().slice(0, 10);
+      { const d = new Date(); _e.catalogo.generado = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }   // fecha local
       _e.catalogo.rev = 3;   // M9-A/B: clientes por UUID y código; técnicos con rol y teléfono
       _e.catalogo.resumen = {
         equipos: eq.length, clientes: cli.length,
