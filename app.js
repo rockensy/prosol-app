@@ -2183,7 +2183,7 @@ function datosSeg(sg, extra) {
     clave_visita: sg.key, numero_ot: sg.numero_ot || null, serie: m.serie || null, cliente_nombre: m.cliente || null,
     equipo_txt: m.equipo || null, tecnico: estado.tecnico, tipo_mant: m.tipoMant || null, clase: m.clase || null,
     etapa: sg.etapa, etapas: (sg.ev || []).map(x => ({ e: x.e, t: x.t })),
-    avances: (sg.av || []).map(x => ({ t: x.t, texto: x.texto || "", n: x.n || 0, visible: x.visible !== false }))
+    avances: (sg.av || []).map(x => ({ t: x.t, texto: x.texto || "", n: x.n || 0, visible: x.visible !== false, fotos: x.fotos || [] }))
   }, extra || {});
 }
 function publicarSeg(token, datos) {
@@ -2266,7 +2266,7 @@ function migrarSeg(viejo, nuevo) {
   if (estado._otCtx && estado._otCtx.segKey === viejo) estado._otCtx.segKey = nuevo;
   guardarSeg();
 }
-function anotarSeg(key, serie, tipo, etapa, texto, adjuntos, visible) {
+function anotarSeg(key, serie, tipo, etapa, texto, adjuntos, visible, archivos) {
   const sg = segDe(key, true), t = new Date().toISOString();
   const it = estado._segIt;
   if (it && it.k + ":" + it.id === key) sg.meta = { cliente: it.cliente, equipo: it.equipo, serie: it.serie, tipoMant: it.tipoMant, clase: it.clase };
@@ -2274,14 +2274,40 @@ function anotarSeg(key, serie, tipo, etapa, texto, adjuntos, visible) {
   if (tipo === "ETAPA") { sg.etapa = etapa; sg.ev.push({ e: etapa, t }); }
   else sg.av.push({ t, texto: texto || "", n: adjuntos || 0, visible: visible !== false });
   publicarSeg(sg.token, datosSeg(sg));
-  (estado.avQ = estado.avQ || []).push({ fila: { serie, clave_visita: key, numero_ot: sg.numero_ot || null, tecnico: estado.tecnico, tipo, etapa: etapa || sg.etapa, texto: texto || null, adjuntos: adjuntos || 0, ocurrio: t } });
+  // v3.59: las FOTOS del avance parcial se guardan en la nube (almacenamiento prosol-fotos); los videos siguen solo por WhatsApp
+  const fotosAv = (archivos || []).filter(f => /^image\//.test(f.type || "") || /\.(jpe?g|png|webp|heic)$/i.test(f.name || ""));
+  (estado.avQ = estado.avQ || []).push({ fila: { serie, clave_visita: key, numero_ot: sg.numero_ot || null, tecnico: estado.tecnico, tipo, etapa: etapa || sg.etapa, texto: texto || null, adjuntos: adjuntos || 0, ocurrio: t },
+    archivos: fotosAv.length ? fotosAv : undefined });
   guardarSeg(); syncAvances();
+}
+function _leerComoDataURL(f) {
+  return new Promise((res) => { try { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(null); r.readAsDataURL(f); } catch (e) { res(null); } });
+}
+// sube las fotos pendientes de un avance; devuelve la lista de enlaces o null si no hay conexión al depósito (queda en cola)
+async function subirFotosAvance(r) {
+  if (!r.archivos || !r.archivos.length) return r.fila.fotos || [];
+  const enlaces = (r.fila.fotos || []).slice(), base = "ot/avances/" + String(r.fila.clave_visita || "sin-clave").replace(/[^A-Za-z0-9_-]/g, "_") + "/";
+  for (let i = enlaces.length; i < r.archivos.length; i++) {
+    const d = await _leerComoDataURL(r.archivos[i]); if (!d) { enlaces.push(null); continue; }
+    const red = (await reducirFoto(d, 1280)) || d;
+    enlaces.push(await API.subirFoto(base + Date.now() + "_" + (i + 1) + ".jpg", red));   // si falla, lanza y el avance queda en cola
+    r.fila.fotos = enlaces.slice();
+  }
+  return enlaces.filter(Boolean);
 }
 let _avBusy = false;
 async function syncAvances() {
   if (_avBusy || typeof API === "undefined" || !API.hayNube() || !navigator.onLine || !(estado.avQ || []).length) return;
   _avBusy = true;
-  try { let r; while ((r = (estado.avQ || [])[0])) { await API.insert("ot_avances", r.fila); estado.avQ = estado.avQ.filter(x => x !== r); } } catch (x) { /* sin red: queda en cola */ }
+  try { let r; while ((r = (estado.avQ || [])[0])) {
+    const fotos = await subirFotosAvance(r);
+    await API.insert("ot_avances", Object.assign({}, r.fila, fotos.length ? { fotos: fotos } : {}));
+    estado.avQ = estado.avQ.filter(x => x !== r);
+    if (fotos.length) {   // el seguimiento del cliente muestra las fotos del avance (si el avance es visible)
+      const sg = segDe(r.fila.clave_visita, false), a = sg && (sg.av || []).find(x => x.t === r.fila.ocurrio);
+      if (a) { a.fotos = fotos; publicarSeg(sg.token, datosSeg(sg)); }
+    }
+  } } catch (x) { /* sin red: queda en cola */ }
   finally { _avBusy = false; guardarSeg(); }
 }
 function itemDeTarjeta(k, id) {
@@ -2395,7 +2421,7 @@ function segInformarParcial() {
   const it = estado._segIt; if (!it) return;
   const texto = $("#seg-texto").value.trim(), files = estado._segFiles || [];
   if (!texto && !files.length) { toast("Escribe el detalle o agrega foto/video.", "err"); return; }
-  anotarSeg(it.k + ":" + it.id, it.serie, "PARCIAL", null, texto, files.length, $("#seg-visible") ? $("#seg-visible").checked : true);
+  anotarSeg(it.k + ":" + it.id, it.serie, "PARCIAL", null, texto, files.length, $("#seg-visible") ? $("#seg-visible").checked : true, files);
   const msg = msgParcial(it, texto, files.length);
   const sg = segDe(it.k + ":" + it.id, false);
   $("#sheet-seg").hidden = true; pintarHoy();
@@ -2685,7 +2711,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.58";
+const APP_VERSION = "v3.59";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -3105,7 +3131,7 @@ async function _cargarPanel() {
       _getData('equipos'), _getData('clientes'),
       _getData('ordenes'), _getData('visitas_programadas')
     ]);
-    const hoy = new Date().toISOString().slice(0,10);
+    const hoy = _hoyLocal();
     const ab = ord.filter(o => ['ABIERTA','EN PROCESO','PENDIENTE'].includes(o.estado||''));
     const vp = prog.filter(p => p.estado !== 'EJECUTADA' && p.estado !== 'CANCELADA');
     const costo = ord.reduce((s,o) => s+Number(o.valor_total||0), 0);
@@ -3497,7 +3523,7 @@ function _pintarOrdenes(q) {
   if (!cont) return;
 
   const buscar = (q || '').toLowerCase().trim();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = _hoyLocal();
 
   let ff = _todasOrdMov.filter(o => {
     // Filtro por estado
@@ -3544,7 +3570,7 @@ function _pintarOrdenes(q) {
   cont.innerHTML = ff.slice(0, 80).map(o => {
     const est = (o.estado || '—').toUpperCase();
     const col = COLS[est] || 'info';
-    const venc = o.fecha && o.fecha < new Date().toISOString().slice(0,10)
+    const venc = o.fecha && o.fecha < _hoyLocal()
                  && ['ABIERTA','EN PROCESO','PENDIENTE'].includes(est);
     const btnDel = _esAdminOT
       ? '<button class="btn" style="background:#C0392B;color:#fff;font-size:11px;padding:3px 8px;margin-top:6px" onclick="_eliminarOTMov(&quot;' + o.id + '&quot;,&quot;' + (o.numero_ot||'') + '&quot;)">🗑 Eliminar</button>'
@@ -3594,7 +3620,7 @@ async function _cargarProgMov() {
     ]);
     const cliMap = {}; cli.forEach(c => cliMap[c.id] = c);
     const eqMap  = {}; eq.forEach(e  => eqMap[e.id]  = e);
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = _hoyLocal();
 
     _todasProgMov = prog
       .filter(p => p.estado !== 'EJECUTADA' && p.estado !== 'CANCELADA')
@@ -3921,11 +3947,11 @@ window._liqMovSelLiq = function(id) {
 };
 
 window._liqMovBuscar = function() {
-  const hoy = new Date().toISOString().slice(0, 10);
-  const d = new Date(hoy); d.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1));
-  const lunes = d.toISOString().slice(0, 10);
+  const hoy = _hoyLocal();
+  const d = _fechaDeISO(hoy); d.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1));
+  const lunes = _fechaLocal(d);
   const dom = new Date(d); dom.setDate(dom.getDate() + 6);
-  const domingo = dom.toISOString().slice(0, 10);
+  const domingo = _fechaLocal(dom);
   const elD = document.getElementById('liqm-desde');
   const elH = document.getElementById('liqm-hasta');
   if (elD) elD.value = lunes;
@@ -3955,7 +3981,7 @@ window._liqMovTodas = function() {
 window._liqMovGenerar = async function() {
   const marc = _liqMovDatos.ots.filter(o => o._marcada && !o.id_liquidacion);
   if (!marc.length) { toastG('⚠ Marca al menos una OT pendiente', 'err'); return; }
-  const desde = document.getElementById('liqm-desde')?.value || new Date().toISOString().slice(0,10);
+  const desde = document.getElementById('liqm-desde')?.value || _hoyLocal();
   const hasta = document.getElementById('liqm-hasta')?.value || desde;
   const sub = marc.reduce((s,o) => s + parseFloat(o.valor_total||0), 0);
   const iva = Math.round(sub*0.15*100)/100;
@@ -3982,7 +4008,7 @@ window._liqMovGenerar = async function() {
 window._liqMovPagar = async function() {
   const marc = _liqMovDatos.ots.filter(o => o._marcada && !o.id_liquidacion);
   if (!marc.length) { toastG('⚠ Marca al menos una OT pendiente', 'err'); return; }
-  const desde = document.getElementById('liqm-desde')?.value || new Date().toISOString().slice(0,10);
+  const desde = document.getElementById('liqm-desde')?.value || _hoyLocal();
   const hasta = document.getElementById('liqm-hasta')?.value || desde;
   const sub = marc.reduce((s,o) => s + parseFloat(o.valor_total||0), 0);
   const iva = Math.round(sub*0.15*100)/100;
@@ -4017,7 +4043,7 @@ window._liqMovAbonar = async function() {
     const nuevoPag = Math.min(parseFloat(l.total_pagado||0) + val, parseFloat(l.total||0));
     const nuevoSal = Math.max(parseFloat(l.total||0) - nuevoPag, 0);
     const nuevoEst = nuevoSal <= 0 ? 'PAGADA' : 'PARCIAL';
-    const pagosList = [...(l._pagos||[]), {fecha: new Date().toISOString().slice(0,10), forma, valor: val}];
+    const pagosList = [...(l._pagos||[]), {fecha: _hoyLocal(), forma, valor: val}];
     await API.update('liquidaciones', l.id, {
       total_pagado: nuevoPag, saldo: nuevoSal, estado: nuevoEst,
       pagos_json: JSON.stringify(pagosList)
@@ -4089,7 +4115,7 @@ async function _liqMovCargarFact() {
       const sal = ff.reduce((s,f) => s+parseFloat(f.saldo||0), 0);
       kpis.textContent = 'Total: $' + tot.toFixed(2) + '  Por cobrar: $' + sal.toFixed(2);
     }
-    const hoy = new Date().toISOString().slice(0,10);
+    const hoy = _hoyLocal();
     cont.innerHTML = ff.length
       ? ff.map(f => {
           const venc = f.fecha_vence && f.fecha_vence < hoy && f.estado !== 'CANCELADA';

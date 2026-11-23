@@ -42,7 +42,9 @@
     }).join('') + `</ul></div>`;
     const av = s.avances || [];
     if (av.length) {
-      h += `<div class="card"><h2>Novedades informadas por el técnico</h2>` + av.map((a) => `<div class="av"><small>${esc(hora(a.t))}${a.n ? ' · 📎 ' + a.n + ' adjunto(s) enviados por WhatsApp' : ''}</small>${esc(a.texto || '(fotos o video enviados por WhatsApp)')}</div>`).join('') +
+      h += `<div class="card"><h2>Novedades informadas por el técnico</h2>` + av.map((a) => { const fs = (a.fotos || []).filter((u) => /^https:\/\//.test(u));
+        return `<div class="av"><small>${esc(hora(a.t))}${a.n && !fs.length ? ' · 📎 ' + a.n + ' adjunto(s) enviados por WhatsApp' : ''}</small>${esc(a.texto || (fs.length ? '' : '(fotos o video enviados por WhatsApp)'))}` +
+          (fs.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${fs.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Foto del avance" style="width:96px;height:96px;object-fit:cover;border-radius:6px"></a>`).join('')}</div>` : '') + `</div>`; }).join('') +
         `<p class="nota">⚠️ Información preliminar durante el servicio; prevalece el reporte final.</p></div>`;
     }
     if (fin && r) {

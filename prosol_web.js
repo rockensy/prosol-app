@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.58</strong>
+        <strong>Versión PROSOL v3.59</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.58';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.59';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -288,7 +288,7 @@ VIEWS.dashboard = async () => {
     API.select('tecnicos').catch(()=>[]),
     API.select('visitas_programadas').catch(()=>[])
   ]);
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = _hoyLocal();
   const eqMap={}; eq.forEach(e=>eqMap[e.id]=e);
   const cliMap={}; cli.forEach(c=>cliMap[c.id]=c);
   const ordAb = ord.filter(o=>['ABIERTA','EN PROCESO','PENDIENTE'].includes(o.estado||''));
@@ -347,7 +347,7 @@ VIEWS.programacion = async () => {
   ]);
   const eqMap={}; eq.forEach(e=>eqMap[e.id]=e);
   const cliMap={}; cli.forEach(c=>cliMap[c.id]=c);
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = _hoyLocal();
   function pintar() {
     const q=($id('q').value||'').toLowerCase(), est=$id('filtEst').value;
     const filas = prog.filter(p=>{
@@ -596,7 +596,7 @@ VIEWS.liquidacion = async () => {
 };
 
 function _liqRender() {
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = _hoyLocal();
   const lunes = _liqLunes(hoy);
   const domingo = _liqDomingo(hoy);
 
@@ -745,12 +745,12 @@ function _liqRender() {
 
 // ── Helpers fecha ────────────────────────────────────────────────────
 function _liqLunes(iso) {
-  const d = new Date(iso); d.setDate(d.getDate() - d.getDay() + (d.getDay()===0?-6:1));
-  return d.toISOString().slice(0,10);
+  const d = _fechaDeISO(iso); d.setDate(d.getDate() - d.getDay() + (d.getDay()===0?-6:1));
+  return _fechaLocal(d);
 }
 function _liqDomingo(iso) {
-  const d = new Date(_liqLunes(iso)); d.setDate(d.getDate()+6);
-  return d.toISOString().slice(0,10);
+  const d = _fechaDeISO(_liqLunes(iso)); d.setDate(d.getDate()+6);
+  return _fechaLocal(d);
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────
@@ -920,7 +920,7 @@ window._liqSelLiq = function(id) {
 window._liqGenerar = async function() {
   const marcadas = _liqDatos.ots.filter(o => o._marcada && !o.id_liquidacion);
   if (!marcadas.length) { toast('⚠ Marca al menos una OT pendiente'); return; }
-  const desde = $id('liq-desde')?.value || new Date().toISOString().slice(0,10);
+  const desde = $id('liq-desde')?.value || _hoyLocal();
   const hasta = $id('liq-hasta')?.value || desde;
   const sub = marcadas.reduce((s,o) => s + parseFloat(o.valor_total||0), 0);
   const iva = Math.round(sub * 0.15 * 100) / 100;
@@ -952,7 +952,7 @@ window._liqPagarDirecto = async function() {
   if (!marcadas.length) { toast('⚠ Marca al menos una OT pendiente'); return; }
   const forma = prompt('Forma de pago: EFECTIVO / TRANSFERENCIA / CHEQUE', 'TRANSFERENCIA');
   if (!forma) return;
-  const desde = $id('liq-desde')?.value || new Date().toISOString().slice(0,10);
+  const desde = $id('liq-desde')?.value || _hoyLocal();
   const hasta = $id('liq-hasta')?.value || desde;
   const sub = marcadas.reduce((s,o) => s + parseFloat(o.valor_total||0), 0);
   const iva = Math.round(sub * 0.15 * 100) / 100;
@@ -988,7 +988,7 @@ window._liqAbonar = async function() {
   try {
     await API.insert('liquidacion_pagos', {
       id_liquidacion: l.id,
-      fecha: new Date().toISOString().slice(0,10),
+      fecha: _hoyLocal(),
       forma, valor: val
     });
     const nuevoTotal = Math.min(parseFloat(l.total_pagado||0) + val, parseFloat(l.total||0));
@@ -1081,7 +1081,7 @@ async function _factCargar() {
   if (q) ff = ff.filter(f => [f.numero, f.numero_ot, f.cliente_nombre, f.serie].some(x => String(x||'').toLowerCase().includes(q)));
   const tbody = $id('fact-tbody');
   if (!tbody) return;
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = _hoyLocal();
   tbody.innerHTML = ff.map(f => {
     const venc = f.fecha_vence && f.fecha_vence < hoy && f.estado !== 'CANCELADA';
     const color = venc ? '#E74C3C' : (f.estado==='CANCELADA' ? '#117A65' : '');
@@ -1111,7 +1111,7 @@ window._factEditar = function(id) { _factDialogo(id); };
 function _factDialogo(id) {
   const f = id ? (_factList.find(x => x.id === id) || {}) : {};
   cerrarModal();
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = _hoyLocal();
   $id('modal-body').innerHTML = `
   <h3 style="margin:0 0 12px">${id ? 'Editar factura' : 'Nueva factura'}</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -1207,7 +1207,7 @@ window._factPago = function(id) {
   <h3 style="margin:0 0 8px">Registrar pago — Factura ${ESC(f.numero||'')}</h3>
   <p style="margin:0 0 12px;font-size:13px">Saldo actual: <b>$${parseFloat(f.saldo||0).toFixed(2)}</b></p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-    <div><label class="lbl-web">Fecha</label><input id="fp-fec" type="date" class="inp-web" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div><label class="lbl-web">Fecha</label><input id="fp-fec" type="date" class="inp-web" value="${_hoyLocal()}"></div>
     <div><label class="lbl-web">Forma</label>
       <select id="fp-forma" class="inp-web"><option>EFECTIVO</option><option selected>TRANSFERENCIA</option><option>CHEQUE</option></select></div>
     <div><label class="lbl-web">Valor</label><input id="fp-val" type="number" class="inp-web" value="${parseFloat(f.saldo||0).toFixed(2)}" step="0.01"></div>
@@ -1276,7 +1276,7 @@ window._profNueva = function() { _profDialogo(null); };
 function _profDialogo(id) {
   const p = id ? (_profList.find(x => x.id === id) || {}) : {};
   cerrarModal();
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = _hoyLocal();
   $id('modal-body').innerHTML = `
   <h3 style="margin:0 0 12px">${id ? 'Editar proforma' : 'Nueva proforma / cotización'}</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -1608,7 +1608,7 @@ function _fichaOT(o,acts,clientes,equipos){
 async function _generarTipoRep(tipo,filtro,ord,cli,eq,prog){
   filtro=(filtro||'').toLowerCase();
   const cliMap={}; cli.forEach(c=>cliMap[c.id]=c);
-  const hoy=new Date().toISOString().slice(0,10);
+  const hoy=_hoyLocal();
   let html='';
   if(tipo==='estado'){
     const g={}; ord.forEach(o=>{const k=o.estado||'SIN';(g[k]=g[k]||[]).push(o);});
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.58</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.59</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2093,7 +2093,7 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
           ${prefill.tipo_ot&&!actsOrdenadas.some(a=>a.descripcion===prefill.tipo_ot)?`<option value="__custom__" selected data-desc="${ESC(prefill.tipo_ot)}">${ESC(prefill.tipo_ot)}</option>`:''}
         </select>
         <label style="display:block;font-size:12px;font-weight:700;margin:8px 0 4px">Fecha</label>
-        <input class="inp-web" id="ot_fecha" type="date" value="${new Date().toISOString().slice(0,10)}">
+        <input class="inp-web" id="ot_fecha" type="date" value="${_hoyLocal()}">
       </div>
       <div>
         <label style="display:block;font-size:12px;font-weight:700;margin-bottom:4px">Técnico</label>

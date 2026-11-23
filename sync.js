@@ -83,7 +83,7 @@ const SYNC = (() => {
     const cat = {
       tipo: 'PROSOL_CATALOGO',
       version: new Date().toISOString().slice(0, 16).replace(/[-:T]/g, ''),
-      fecha: new Date().toISOString().slice(0, 10),
+      fecha: _hoyLocal(),
       config: cfg,
       clientes: (clientes || []).map((c) => ({
         ID_CLIENTE: c.id_escritorio || c.id,
