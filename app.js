@@ -588,18 +588,56 @@ function progsFiltradas(q) {
       .filter(Boolean).join(" ").toLowerCase().includes(q);
   });
 }
+// v3.68 · Agenda programada (calendario) en el celular, con el catálogo guardado (funciona sin internet)
+function citasMovil() {
+  const progs = (estado.catalogo?.programaciones || []).filter(p => (p.ESTADO || "PROGRAMADA").toUpperCase() !== "CANCELADA");
+  const eqs = estado.catalogo?.equipos || [];
+  const ots = (estado.catalogo?.historial_ot || []).map(o => ({ serie: o.SERIE, fecha: o.FECHA, numero: o.NUMERO_OT, tipo: o.TIPO_OT }));
+  const citas = progs.map(p => {
+    const cli = clientePorId(p.ID_CLIENTE) || {};
+    const e = eqs.find(x => x.SERIE === p.SERIE) || {};
+    const a = (estado.asig || {})["PROG:" + (p.ID_VISITA || p.ID_SB)];
+    return { id: String(p.ID_VISITA || p.ID_SB), fecha: p.FECHA_PROGRAMADA || "", hora: p.HORA || "", cliente: cli.RAZON_SOCIAL || "—",
+      codCliente: cli.ID_CLIENTE || "", serie: p.SERIE || "", equipo: [e.MARCA, e.MODELO, e.POTENCIA_KW ? e.POTENCIA_KW + " kW" : ""].filter(Boolean).join(" "),
+      lugar: [e.UBICACION, e.GPS_LAT != null ? "GPS " + e.GPS_LAT + ", " + e.GPS_LNG : ""].filter(Boolean).join(" · "),
+      tipo: p.TIPO_MANTENIMIENTO || "", novedades: p.OBSERVACION || "", contactoCita: p.CONTACTO_CITA, telefonoCita: p.TELEFONO_CITA,
+      contactoEquipo: e.CONTACTO, telefonoEquipo: e.CONTACTO_TEL || e.CLIENTE_TEL, atendida: (p.ESTADO || "").toUpperCase() === "EJECUTADA",
+      tecnico: a && a.tecnico, registro: [p.REGISTRADO_POR, (p.FECHA_REGISTRO || "").slice(0, 16)].filter(Boolean).join(" · "), _p: p };
+  });
+  return typeof AGENDA !== "undefined" ? AGENDA.completar(citas, ots) : citas;
+}
+function pintarAgendaMovil() {
+  const c = $("#ag-movil"); if (!c || typeof AGENDA === "undefined") return;
+  AGENDA.render(c, citasMovil(), { onCita: (ci) => {
+    $("#sheet-cita-titulo").textContent = "Cita · " + (ci.cliente || "");
+    $("#sheet-cita-body").innerHTML = AGENDA.detalleHTML(ci) +
+      `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="ag-atender">Atender</button>
+       ${ci.telefonoCita || ci.telefonoEquipo ? `<a class="btn btn-ghost btn-sm" href="tel:${ESC(ci.telefonoCita || ci.telefonoEquipo)}">📞 Llamar</a>` : ""}</div>`;
+    const b = $("#ag-atender");
+    if (b) b.onclick = () => {
+      $("#sheet-cita").hidden = true;
+      const it = itemDeTarjeta("PROG", ci.id);
+      if (it) { atenderItem(it); return; }
+      const eq = (estado.catalogo.equipos || []).find(e => e.SERIE === ci.serie);
+      nuevaOT(eq || { SERIE: ci.serie, ID_CLIENTE: ci._p.ID_CLIENTE }, ci.tipo, { clase: "PROGRAMADA", visita: ci._p });
+    };
+    $("#sheet-cita").hidden = false;
+    $("#sheet-cita-close").onclick = () => { $("#sheet-cita").hidden = true; };
+  } });
+}
 function pintarProgramaciones() {
+  pintarAgendaMovil();
   const cont = $("#lista-prog");
   const count = $("#prog-count");
-  const todas = estado.catalogo?.programaciones || [];
-  const progs = progsFiltradas($("#buscar-prog").value);
+  const todas = (estado.catalogo?.programaciones || []).filter(p => (p.ESTADO || "").toUpperCase() !== "CANCELADA");
+  const progs = progsFiltradas($("#buscar-prog").value).filter(p => (p.ESTADO || "").toUpperCase() !== "CANCELADA");
   $("#prog-vacio").hidden = todas.length > 0;
   count.textContent = todas.length ? `${progs.length} de ${todas.length} programada(s)` : "";
   cont.innerHTML = "";
   progs.forEach(p => {
     const cli = clientePorId(p.ID_CLIENTE);
     const li = document.createElement("li"); li.className = "tw-row";
-    li.innerHTML = `<span class="tw-c1">${p.FECHA_PROGRAMADA || "—"}</span>
+    li.innerHTML = `<span class="tw-c1">${p.FECHA_PROGRAMADA || "—"}${p.HORA ? "<br>" + ESC(p.HORA) : ""}</span>
       <span class="tw-c2">
         <div class="t2-main">${p.TIPO_MANTENIMIENTO || "Mantenimiento"}</div>
         <div class="t2-sub">Serie ${p.SERIE || "—"} · ${cli?.RAZON_SOCIAL || "—"}${(() => { const a = (estado.asig || {})["PROG:" + (p.ID_VISITA || p.ID_SB)]; return a && a.tecnico ? " · 👷 " + ESC(a.tecnico) : ""; })()}</div>
@@ -2746,7 +2784,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.67";
+const APP_VERSION = "v3.68";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
@@ -2982,7 +3020,9 @@ function initSupabase() {
       }));
 
       // 4. Visitas programadas
-      _e.catalogo.programaciones = prog.map(p => ({
+      _e.catalogo.programaciones = prog.filter(p => (p.estado || '') !== 'CANCELADA').map(p => ({   // v3.68: sin canceladas
+        HORA: p.hora || '', CONTACTO_CITA: p.contacto_cita || '', TELEFONO_CITA: p.telefono_cita || '',
+        REGISTRADO_POR: p.registrado_por || '', FECHA_REGISTRO: p.fecha_registro || '',
         ID_VISITA: p.id_escritorio || p.id,
         ID_SB: p.id,
         ID_EQUIPO: p.id_equipo, SERIE: p.serie || '',

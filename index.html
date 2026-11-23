@@ -49,7 +49,7 @@
 <!-- Barra de estado de sincronización (signature, siempre visible) -->
 <header id="syncbar" class="syncbar">
   <div class="syncbar-left">
-    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.67</span>
+    <span class="brand">PROSOL</span><span class="brand-sub">Campo</span><span class="brand-ver" id="brand-ver">v3.68</span>
   </div>
   <div class="syncbar-right">
     <button id="chip-catalogo" class="chip" data-go="oficina">
@@ -269,6 +269,7 @@
       <button class="back" data-go="inicio">‹</button>
       <h1>Mantenimientos programados</h1>
     </div>
+    <div id="ag-movil" style="margin:6px 10px 10px"></div>
     <div class="searchbar">
       <input id="buscar-prog" type="search" placeholder="Filtrar por serie, cliente o fecha">
     </div>
@@ -492,6 +493,17 @@
   </div>
 </div>
 
+<!-- v3.68 · Hoja modal: detalle de una cita de la Agenda programada -->
+<div class="sheet" id="sheet-cita" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="sheet-cita-titulo">Cita</h2>
+      <button class="sheet-close" id="sheet-cita-close">✕</button>
+    </div>
+    <div id="sheet-cita-body" style="overflow:auto"></div>
+  </div>
+</div>
+
 <!-- Hoja modal: completar datos del equipo (M9-A) -->
 <div class="sheet" id="sheet-eq-edit" hidden>
   <div class="sheet-card">
@@ -649,6 +661,7 @@
 <script src="lib/api.js"></script>
 <script src="lib/auth.js"></script>
 <script src="lib/wa.js"></script>
+<script src="lib/agenda.js"></script>
 <script src="db.js"></script>
 <script src="sync.js"></script>
 <script src="prosol_web.js"></script>

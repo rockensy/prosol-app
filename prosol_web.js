@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.67</strong>
+        <strong>Versión PROSOL v3.68</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.67';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.68';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -332,7 +332,10 @@ VIEWS.programacion = async () => {
       '<button class="btn-web prim" onclick="PROSOL_WEB.ir(\'config\')">⚙ Ir a Configuración</button></div></div>';
     return;
   }
-  $id('main').innerHTML = `<div class="card"><h2>📅 Programación de mantenimiento</h2>
+  $id('main').innerHTML = `<div class="card"><h2>📅 Agenda programada</h2>
+    <p style="font-size:12px;color:#666;margin:0 0 4px">Citas confirmadas con los clientes (se registran en el escritorio). Clic en un cliente para ver el detalle.</p>
+    <div id="agWeb">Cargando…</div></div>
+    <div class="card"><h2>📅 Programación de mantenimiento</h2>
     <div class="toolbar">
       <input id="q" class="inp-web" style="max-width:280px" placeholder="Buscar equipo, tipo, serie...">
       <select id="filtEst" class="inp-web" style="max-width:180px">
@@ -340,14 +343,30 @@ VIEWS.programacion = async () => {
         <option>PROGRAMADA</option><option>EJECUTADA</option><option>CANCELADA</option>
       </select>
     </div><div id="lista">Cargando…</div></div>`;
-  const [prog,eq,cli] = await Promise.all([
+  const [prog,eq,cli,ord,asig] = await Promise.all([
     API.select('visitas_programadas').catch(()=>[]),
     API.select('equipos').catch(()=>[]),
-    API.select('clientes').catch(()=>[])
+    API.select('clientes').catch(()=>[]),
+    API.select('ordenes').catch(()=>[]),
+    API.select('visitas_asignacion').catch(()=>[])
   ]);
   const eqMap={}; eq.forEach(e=>eqMap[e.id]=e);
   const cliMap={}; cli.forEach(c=>cliMap[c.id]=c);
   const hoy = _hoyLocal();
+  // v3.68 · Agenda programada (calendario)
+  const asigMap={}; asig.forEach(a=>{ if(a.clave) asigMap[a.clave]=a.tecnico; });
+  const citas = prog.filter(p=>(p.estado||'')!=='CANCELADA').map(p=>{
+    const e=eqMap[p.id_equipo]||{}, c=cliMap[p.id_cliente]||{};
+    return { id:String(p.id), fecha:p.fecha_programada||'', hora:p.hora||'', cliente:c.razon_social||'—', codCliente:c.id_escritorio||'',
+      serie:p.serie||e.serie||'', equipo:[e.marca,e.modelo,e.potencia_kw?e.potencia_kw+' kW':''].filter(Boolean).join(' '),
+      lugar:[e.ubicacion||c.direccion,c.zona,c.ciudad,(e.gps_lat!=null?'GPS '+e.gps_lat+', '+e.gps_lng:'')].filter(Boolean).join(' · '),
+      tipo:p.tipo_mantenimiento||'', novedades:p.observacion||'', contactoCita:p.contacto_cita, telefonoCita:p.telefono_cita,
+      contactoEquipo:e.contacto||c.contacto, telefonoEquipo:e.contacto_tel||c.telefono, atendida:p.estado==='EJECUTADA',
+      tecnico:asigMap['PROG:'+(p.id_escritorio||p.id)], registro:[p.registrado_por,(p.fecha_registro||'').slice(0,16)].filter(Boolean).join(' · ') };
+  });
+  AGENDA.completar(citas, ord.map(o=>({serie:o.serie, fecha:o.fecha, numero:o.numero_ot, tipo:o.tipo_ot})));
+  AGENDA.render($id('agWeb'), citas, { onCita: ci => modal(AGENDA.detalleHTML(ci) +
+    '<div style="text-align:right;margin-top:12px"><button class="btn-web" onclick="PROSOL_WEB.cerrarModal()">Cerrar</button></div>') });
   function pintar() {
     const q=($id('q').value||'').toLowerCase(), est=$id('filtEst').value;
     const filas = prog.filter(p=>{
@@ -359,7 +378,7 @@ VIEWS.programacion = async () => {
         const e=eqMap[p.id_equipo]||{}, c=cliMap[p.id_cliente]||{};
         const venc=p.fecha_programada&&p.fecha_programada<hoy;
         const col=venc?'#E74C3C':p.estado==='EJECUTADA'?'#27AE60':'#1C2733';
-        return [`<span style="color:${col};font-weight:${venc?700:400}">${ESC(p.fecha_programada||'—')}${venc?' ⚠':''}</span>`,
+        return [`<span style="color:${col};font-weight:${venc?700:400}">${ESC(p.fecha_programada||'—')}${p.hora?' '+ESC(p.hora):''}${venc?' ⚠':''}</span>`,
           ESC(e.nombre_equipo||p.serie||'—'),ESC(e.codigo||'—'),ESC(c.razon_social||'—'),
           ESC(p.tipo_mantenimiento||'—'),`<span style="color:${col};font-weight:700">${ESC(p.estado||'PROGRAMADA')}</span>`,
           `<button class="btn-web mini prim" data-pid="${p.id}">+ OT</button>`];
@@ -1921,7 +1940,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.67</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.68</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
