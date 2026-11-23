@@ -119,6 +119,7 @@ function liberarFotosViejas() {
   return liberadas;
 }
 async function cerrarSesion() {
+  try { if (typeof API !== "undefined" && API.salirNube) API.salirNube(); } catch (e) {}   // M11 Fase B
   if (estado.tecnico) {
     await DB.set("ordenes::" + estado.tecnico, estado.ordenes);
     await DB.set("envios::" + estado.tecnico, estado.envios);
@@ -2721,6 +2722,7 @@ async function verificarIngreso(usuario, clave) {
     const u = await API.rpc("pwa_login", { p_usuario: usuario, p_hash: h });
     if (!u) return null;
     cred[usuario] = { salt: salt, h: h }; localStorage.setItem(LS_CRED_ING, JSON.stringify(cred));
+    if (API.ingresarNube) { try { await API.ingresarNube(usuario, clave); } catch (e) {} }   // M11 Fase B: sesión por usuario y rol
     return u;
   }
   const c = cred[usuario];
@@ -2744,7 +2746,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.65";
+const APP_VERSION = "v3.66";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
