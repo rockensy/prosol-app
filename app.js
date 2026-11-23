@@ -71,6 +71,7 @@ const DB = {
 };
 
 async function guardarLocal() {
+  setTimeout(() => { try { refrescarSync(); } catch (e) {} }, 0);   // v3.70: contador de pendientes al día
   await DB.set("tecnico", estado.tecnico);
   await DB.set("catalogo", estado.catalogo);
   await DB.set("solicitudes", estado.solicitudes);
@@ -194,7 +195,11 @@ function refrescarSync() {
     txt.textContent = "Cat. " + (cat.generado || "").slice(0, 10);
   } else { dot.classList.remove("ok"); txt.textContent = "Sin catálogo"; }
   const n = pendOficina();
-  $("#chip-pend-num").textContent = n;
+  // v3.70: el contador superior muestra TODO lo que falta enviar a la nube (OT, avances, seguimientos y envíos)
+  const pt = pendientesTotal();
+  $("#chip-pend-num").textContent = pt.total;
+  const chip = $("#chip-pend-num") && $("#chip-pend-num").parentElement;
+  if (chip) chip.title = pt.detalle || "Nada pendiente";
   const set = (id, v) => { const el = $("#" + id); if (el) el.textContent = v; };
   set("badge-pend", n); set("hero-pend", n); set("badge-hist", estado.historial.length);
   // insignias de las pestañas
@@ -423,7 +428,8 @@ function abrirEquipo(e) {
     const hrs = Number(o.HORAS_MAQUINA) > 0 ? " · " + Number(o.HORAS_MAQUINA) + " h" : "";
     li.innerHTML = `<div class="tl-date">${fmtFecha(o.FECHA)} · OT ${ESC(o.NUMERO_OT) || "—"}</div>
       <div class="tl-meta">${ESC(o.TIPO_OT)} · ${ESC(o.ESTADO)}${hrs}</div>
-      ${acts ? `<div class="tl-acts">${ESC(acts)}</div>` : ""}`;
+      ${acts ? `<div class="tl-acts">${ESC(acts)}</div>` : ""}
+      ${o.PDF_URL ? `<a class="tl-pdf" href="${ESC(o.PDF_URL)}" target="_blank" rel="noopener" style="color:var(--azul);font-weight:600">📄 Ver orden (PDF)</a>` : ""}`;
     ul.appendChild(li);
   });
   ir("equipo-detalle");
@@ -1000,6 +1006,11 @@ window._prosolTrasSubir = async () => {
   if (estado._gdPinta) estado._gdPinta();
 };
 // órdenes que faltan llegar a oficina (con nube: las no subidas; sin nube: las no empaquetadas)
+function pendientesTotal() {
+  const ot = pendOficina() || 0, av = (estado.avQ || []).length, sg = Object.keys(estado.segQ || {}).length, en = (estado.envQ || []).length;
+  const det = [ot ? ot + " orden(es)" : "", av ? av + " avance(s)" : "", sg ? sg + " seguimiento(s) del cliente" : "", en ? en + " envío(s)" : ""].filter(Boolean).join(", ");
+  return { ot, av, sg, en, total: ot + av + sg + en, detalle: det };
+}
 function pendOficina() {
   if (typeof API !== "undefined" && API.hayNube() && window._prosolPendientesNube) return window._prosolPendientesNube();
   return estado.ordenes.length;
@@ -1080,6 +1091,8 @@ function abrirOrdenHistorial(idx) {
       <a href="https://maps.google.com/?q=${h.GPS_LAT},${h.GPS_LON}" target="_blank"
         style="color:var(--azul)">Ver ubicación del servicio en el mapa</a></div>` : ""}
     <div class="row-sub">📷 ${fotosInfo}</div>
+    ${(() => { const o = historialDeSerie(h.SERIE).find(x => String(x.NUMERO_OT) === String(h.NUMERO_OT) && x.PDF_URL);
+      return o ? `<div class="row-sub" style="margin-top:6px"><a href="${ESC(o.PDF_URL)}" target="_blank" rel="noopener" style="color:var(--azul);font-weight:600">📄 Ver orden (PDF de oficina)</a></div>` : ""; })()}
     ${envBloqueHTML((() => { const sg = sgDeOT(h); return lotesDe(sg ? sg.key : null, h.NUMERO_OT); })())}`;
   $("#btn-orden-confirmar").textContent = h._confirmada ? "Quitar confirmación" : "Marcar confirmada";
   if ($("#btn-orden-avance")) $("#btn-orden-avance").onclick = () => { $("#sheet-orden").hidden = true; abrirSeg(itemDeOT(h)); };
@@ -1718,6 +1731,8 @@ function crearVisitaNV() {
 
 // Catálogo anterior a M9-B (sin roles ni vínculo de clientes): se baja de nuevo una vez.
 function autoActualizarCatalogo() {
+  // v3.70 (etapa 2): el catálogo se baja solo con un usuario dentro (antes también en la pantalla de ingreso)
+  if (!estado.tecnico) return;
   if (!navigator.onLine || autoActualizarCatalogo._ya
       || !window._prosolSincronizarCatalogoSupabase || typeof API === "undefined" || !API.hayNube()) return;
   autoActualizarCatalogo._ya = true;
@@ -2588,6 +2603,19 @@ function wire() {
     estado._hfVisto = false; setTimeout(mostrarHoyFlotante, 400);
   };
   $("#btn-logout").onclick = async () => {
+    // v3.70: aviso si quedan trabajos sin enviar a la nube
+    const pt = pendientesTotal();
+    if (pt.total > 0) {
+      if (confirm(`Tiene trabajos SIN ENVIAR a la nube: ${pt.detalle}.\n\nQuedan guardados en este celular y se envían al volver a entrar, `
+          + `pero si se borran los datos del navegador o se desinstala la app, SE PIERDEN.\n\n¿Enviar ahora? (Aceptar = enviar y seguir en la app)`)) {
+        syncAvances(); syncEnvios(); syncSegCliente();
+        if (window._prosolSubirPendientes) window._prosolSubirPendientes({ silencioso: false });
+        toast("Enviando pendientes…", "ok"); setTimeout(refrescarSync, 4000);
+        return;
+      }
+      if (confirm(`¿Cerrar la sesión de ${estado.tecnico} de todas formas?\nLos ${pt.total} pendiente(s) quedan guardados en este celular.`)) cerrarSesion();
+      return;
+    }
     const n = estado.ordenes.length;
     const msg = n
       ? `Vas a cerrar la sesión de ${estado.tecnico}.\n\nTus ${n} orden(es) sin enviar `
@@ -2699,6 +2727,8 @@ function nombreTecnico(t) {
     || t.NOMBRE || t.CODIGO || "Técnico";
 }
 function pintarLogin() {
+  // v3.70: el catálogo se baja después de ingresar; con la lista de usuarios ya se puede entrar
+  if (!estado.catalogo && usuariosIngreso().length) estado.catalogo = { rev: 0, generado: "", equipos: [], clientes: [], tecnicos: [], programaciones: [] };
   const hayCat = !!estado.catalogo;
   $("#login-sin-cat").hidden = hayCat;
   $("#login-con-cat").hidden = !hayCat;
@@ -2763,6 +2793,10 @@ async function verificarIngreso(usuario, clave) {
     if (!u) return null;
     cred[usuario] = { salt: salt, h: h }; localStorage.setItem(LS_CRED_ING, JSON.stringify(cred));
     if (API.ingresarNube) { try { await API.ingresarNube(usuario, clave); } catch (e) {} }   // M11 Fase B: sesión por usuario y rol
+    // v3.70: el catálogo ya no se baja antes de ingresar; si este celular aún no tiene técnicos, se baja ahora (con sesión)
+    if (!(estado.catalogo?.tecnicos || []).length && window._prosolSincronizarCatalogoSupabase) {
+      try { await window._prosolSincronizarCatalogoSupabase(); } catch (e) {}
+    }
     return u;
   }
   const c = cred[usuario];
@@ -2786,8 +2820,10 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.69";
+const APP_VERSION = "v3.70";
 async function init() {
+  // v3.70: pedir al navegador que NO borre solo los datos de la app (órdenes y fotos sin enviar)
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()); } catch (e) {}
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
   const lib = liberarFotosViejas();
@@ -2797,7 +2833,14 @@ async function init() {
   ir(estado.tecnico ? "inicio" : "login");
   pintarLogin();
   if (estado.tecnico) setTimeout(mostrarHoyFlotante, 600);
-  setTimeout(() => { syncContactos(true); syncSegCliente(); }, 1200);
+  // v3.70: sin sesión de la nube (entró sin internet o venció) se pide la clave del usuario de este celular
+  if (typeof API !== "undefined" && API.alNecesitarSesion && typeof AUTH !== "undefined" && AUTH.pedirClave)
+    API.alNecesitarSesion(async () => {
+      const u = estado.usuarioIngreso || localStorage.getItem("prosol_usuario_ingreso") || "";
+      if (!estado.tecnico || !u) return null;
+      return AUTH.pedirClave(u);
+    });
+  setTimeout(() => { if (estado.tecnico) { syncContactos(true); syncSegCliente(); } }, 1200);   // v3.70: solo con usuario dentro
   escucharArchivosEntrantes();
   await revisarArchivoCompartido();
   // Aviso al cerrar/recargar si hay órdenes sin empaquetar o archivos sin enviar
@@ -2841,7 +2884,7 @@ if (window.innerWidth < 700) {
   init().then(() => {
     // Inicializar integración Supabase después del arranque
     try { initSupabase(); } catch(e) { console.error('initSupabase:', e); }
-    // v3.55: al abrir la app (también en la pantalla de ingreso) baja técnicos, equipos y visitas de la nube
+    // v3.70: al abrir la app baja técnicos, equipos y visitas SOLO si ya hay un usuario dentro (etapa 2)
     try { autoActualizarCatalogo(); } catch(e) { console.error('autoCat:', e); }
     try { estado.usuarioIngreso = localStorage.getItem("prosol_usuario_ingreso") || ""; cargarUsuariosIngreso(); } catch(e) {}
   }).catch(e => { console.error('init:', e); });
@@ -3069,6 +3112,7 @@ function initSupabase() {
       // 6. Historial OT desde Supabase (origen=ESCRITORIO para el historial completo)
       // Incluye tanto las del escritorio como las del campo ya importadas
       _e.catalogo.historial_ot = ots.map(o => ({
+        PDF_URL: o.pdf_url || '',   // v3.70: PDF de la orden finalizada
         ID_OT: o.id_escritorio || o.id,
         NUMERO_OT: o.numero_ot || '',
         FECHA: o.fecha || '',
@@ -3659,6 +3703,7 @@ function _pintarOrdenes(q) {
           '<div class="m-item-sub">📅 ' + (o.fecha || '—') + ' · ' + (o.tipo_ot || '—') + '</div>' +
           '<div class="m-item-sub">👤 ' + o._cli + '</div>' +
           '<div class="m-item-sub">🔧 Serie: ' + (o.serie || '—') + ' · ' + (o.firma_realiza || '—') + '</div>' +
+          (o.pdf_url ? '<a href="' + String(o.pdf_url).replace(/["<>]/g, '') + '" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;color:#2471A3;font-weight:700">📄 Ver orden (PDF)</a> ' : '') +
           btnDel +
         '</div>' +
         '<span class="m-tag ' + col + '">' + (o.estado || '—') + '</span>' +
