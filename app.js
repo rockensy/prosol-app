@@ -2250,13 +2250,15 @@ async function syncSegCliente() {
   const ks = Object.keys(estado.segQ || {}); if (!ks.length) return;
   _segBusy = true;
   try {
+    // v3.69: cada seguimiento se envía por separado; si uno falla, los demás igual salen (antes uno trababa la cola)
     for (const k of ks) {
       const d = estado.segQ[k];
-      await API.rpc("seguimiento_guardar", { p_token: k, p_datos: d });
-      if (estado.segQ[k] === d) delete estado.segQ[k];       // si cambió mientras se enviaba, se reenvía luego
+      try {
+        await API.rpc("seguimiento_guardar", { p_token: k, p_datos: d });
+        if (estado.segQ[k] === d) delete estado.segQ[k];     // si cambió mientras se enviaba, se reenvía luego
+      } catch (x) { /* sin red o rechazo: ese queda en cola y se reintenta */ }
     }
-  } catch (x) { /* sin red: queda en cola */ }
-  finally { _segBusy = false; guardarLocal(); if (Object.keys(estado.segQ || {}).length && navigator.onLine !== false) setTimeout(syncSegCliente, 15000); }
+  } finally { _segBusy = false; guardarLocal(); if (Object.keys(estado.segQ || {}).length && navigator.onLine !== false) setTimeout(syncSegCliente, 15000); }
 }
 // reduce una foto para la página del cliente (≈800 px, liviana)
 function reducirFoto(dataUrl, max) {
@@ -2784,7 +2786,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.68";
+const APP_VERSION = "v3.69";
 async function init() {
   try { await DB.open(); } catch (e) { /* sin IndexedDB seguimos en memoria */ }
   await cargarLocal();
