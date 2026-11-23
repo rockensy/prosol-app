@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.59</strong>
+        <strong>Versión PROSOL v3.60</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.59';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.60';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1363,7 +1363,7 @@ VIEWS.clientes = ()=>{
   if (!API.hayNube()) { $id('main').innerHTML='<div class="card"><h2>👥 Clientes</h2><div style="background:#FFF3CD;border:1.5px solid #F5A623;border-radius:10px;padding:14px;text-align:center"><p><b>☁ Sin conexión Supabase</b></p><p style="font-size:13px">Ve a Configuración e ingresa la anon key.</p><button class="btn-web prim" onclick="PROSOL_WEB.irConfig()">⚙ Configuración</button></div></div>'; return; }
   crudSimple({
   tabla:'clientes',titulo:'👥 Clientes',
-  cols:[{k:'razon_social',t:'Razón social'},{k:'contacto',t:'Contacto'},{k:'telefono',t:'Teléfono'},{k:'ciudad',t:'Ciudad'},{k:'estado',t:'Estado',pill:1}],
+  cols:[{k:'id_escritorio',t:'Código'},{k:'razon_social',t:'Razón social'},{k:'contacto',t:'Contacto'},{k:'telefono',t:'Teléfono'},{k:'ciudad',t:'Ciudad'},{k:'estado',t:'Estado',pill:1}],
   campos:[{k:'razon_social',t:'Razón social'},{k:'identificacion',t:'RUC/Cédula'},{k:'contacto',t:'Contacto'},{k:'telefono',t:'Teléfono'},{k:'email',t:'Email'},{k:'ciudad',t:'Ciudad'},{k:'direccion',t:'Dirección'},{k:'estado',t:'Estado',tipo:'sel',opts:['ACTIVO','INACTIVO']}]
 }); };
 
@@ -1372,7 +1372,7 @@ VIEWS.equipos = ()=>{
   if (!API.hayNube()) { $id('main').innerHTML='<div class="card"><h2>⚡ Equipos Generac</h2><div style="background:#FFF3CD;border:1.5px solid #F5A623;border-radius:10px;padding:14px;text-align:center"><p><b>☁ Sin conexión Supabase</b></p><button class="btn-web prim" onclick="PROSOL_WEB.irConfig()">⚙ Configuración</button></div></div>'; return; }
   crudSimple({
   tabla:'equipos',titulo:'⚡ Equipos Generac',
-  cols:[{k:'codigo',t:'Código'},{k:'serie',t:'Serie'},{k:'marca',t:'Marca'},{k:'modelo',t:'Modelo'},{k:'potencia_kw',t:'kW'},{k:'estado',t:'Estado',pill:1}],
+  cols:[{k:'id_escritorio',t:'Código'},{k:'serie',t:'Serie'},{k:'marca',t:'Marca'},{k:'modelo',t:'Modelo'},{k:'potencia_kw',t:'kW'},{k:'estado',t:'Estado',pill:1}],
   campos:[{k:'serie',t:'Serie'},{k:'marca',t:'Marca'},{k:'modelo',t:'Modelo'},{k:'potencia_kw',t:'kW',tipo:'num'},{k:'voltaje',t:'Voltaje'},{k:'combustible',t:'Combustible'},{k:'ubicacion',t:'Ubicación'},{k:'estado',t:'Estado',tipo:'sel',opts:['ACTIVO','INACTIVO']}]
 }); };
 
@@ -1871,7 +1871,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.59</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.60</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2050,9 +2050,11 @@ function _formCrud(d,cfg,onSave){
     const row={};
     cfg.campos.forEach(f=>{const v=$id('ff_'+f.k).value;row[f.k]=f.tipo==='num'?(parseFloat(v)||0):v;});
     try{
+      let res=null;
       if(d.id) await API.update(cfg.tabla,d.id,row);
-      else await API.insert(cfg.tabla,row);
-      cerrarModal();toast('✅ Guardado');onSave();
+      else res=await API.insert(cfg.tabla,row);
+      const nuevo=(Array.isArray(res)?res[0]:res)||{};   // M10: la nube asigna el código CLI-/EQ-
+      cerrarModal();toast('✅ Guardado'+(nuevo.id_escritorio?' · código '+nuevo.id_escritorio:''));onSave();
     }catch(e){toast('❌ '+e.message);}
   });
 }
