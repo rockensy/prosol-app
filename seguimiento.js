@@ -121,3 +121,5 @@
   window.__seguimientoRecargar = cargar;
   cargar();
 })();
+
+window.__VERSION_NUEVA = 1;
