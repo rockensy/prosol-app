@@ -67,6 +67,11 @@
     h += `<p class="nota noprint" style="text-align:center">Actualizado: ${esc(hora(s.actualizado))}</p>`;
     $('#app').innerHTML = h;
     const b = $('#btn-pdf'); if (b) b.onclick = () => window.print();
+    if (fin && typeof POSTVENTA !== 'undefined') {           // v3.89 · PSR-9: conformidad remota y reclamos
+      const pv = document.createElement('div'); pv.id = 'postventa';
+      $('#app').insertBefore(pv, $('#app').lastElementChild);
+      POSTVENTA.montar(pv, s, token);
+    }
     document.title = (s.numero_ot ? 'OT ' + s.numero_ot + ' · ' : '') + 'Seguimiento PROSOL';
     clearTimeout(timer);
     if (!fin || !r) timer = setTimeout(cargar, 30000);
