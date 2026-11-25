@@ -22,7 +22,9 @@ const POSTVENTA = (() => {
   }
 
   function firmaCanvas(cv) {
-    const ctx = cv.getContext('2d'); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#1b2631';
+    const ctx = cv.getContext('2d');
+    const blanco = () => { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#000'; };
+    blanco();                                          // v3.90: fondo blanco y trazo negro siempre
     let dib = false, hay = false;
     const pos = (e) => { const r = cv.getBoundingClientRect(); const p = e.touches ? e.touches[0] : e;
       return [(p.clientX - r.left) * cv.width / r.width, (p.clientY - r.top) * cv.height / r.height]; };
@@ -31,7 +33,7 @@ const POSTVENTA = (() => {
     const fin = () => { dib = false; };
     cv.addEventListener('mousedown', ini); cv.addEventListener('mousemove', mov); window.addEventListener('mouseup', fin);
     cv.addEventListener('touchstart', ini, { passive: false }); cv.addEventListener('touchmove', mov, { passive: false }); cv.addEventListener('touchend', fin);
-    return { limpiar: () => { ctx.clearRect(0, 0, cv.width, cv.height); hay = false; }, dato: () => (hay ? cv.toDataURL('image/png') : '') };
+    return { limpiar: () => { blanco(); hay = false; }, dato: () => (hay ? cv.toDataURL('image/png') : '') };
   }
 
   function htmlConformidad(s, pv) {

@@ -1,5 +1,5 @@
 /* PROSOL Campo · service worker — cachea la app para uso sin internet. */
-const CACHE = "prosol-campo-v77";
+const CACHE = "prosol-campo-v78";
 const ASSETS = [
   "./index.html",
   "./style.css",
@@ -20,6 +20,7 @@ const ASSETS = [
   "./lib/agenda.js",
   "./lib/novedades.js",
   "./lib/materiales.js",
+  "./lib/firma_blanca.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -67,6 +68,16 @@ self.addEventListener("fetch", (e) => {
   // El catálogo nunca se cachea: siempre se trae el más reciente de la red.
   if (url.pathname.endsWith("/catalogo.zip") || url.pathname.endsWith("catalogo.zip")) {
     e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    return;
+  }
+  // v3.90: la página de seguimiento del CLIENTE siempre se trae de internet (nunca una versión vieja guardada);
+  // sin señal se usa la última copia.
+  if (/\/(seguimiento\.html|seguimiento\.js|postventa\.js)$/.test(url.pathname)) {
+    e.respondWith(fetch(e.request, { cache: "no-store" }).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(url.pathname.endsWith(".html") ? "./seguimiento.html" : e.request, copy)).catch(() => {});
+      return res;
+    }).catch(() => caches.match(e.request, { ignoreSearch: true })));
     return;
   }
   e.respondWith(

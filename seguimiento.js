@@ -12,6 +12,31 @@
   const hora = (iso) => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
   const fecha = (f) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : (f || ''); };
   const token = (new URLSearchParams(location.search).get('t') || '').toLowerCase();
+  // v3.90 · una firma guardada con fondo negro (trazo gris oscuro invisible) se muestra con fondo blanco y trazo negro
+  function firmaBlanca(img) {
+    if (!img || img.dataset.bn) return;
+    img.dataset.bn = '1';
+    const im = new Image(); im.crossOrigin = 'anonymous';
+    im.onload = () => {
+      try {
+        const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+        const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0);
+        const d = x.getImageData(0, 0, c.width, c.height), p = d.data, n = p.length / 4, h = new Array(256).fill(0);
+        let suma = 0;
+        for (let i = 0; i < p.length; i += 4) { const l = Math.round(0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]); h[l]++; suma += l; }
+        const oscuro = suma / n < 100;
+        let u = 160;
+        if (oscuro) { let a = 0; for (let v = 0; v < 256; v++) { a += h[v]; if (a >= n * 0.9) { u = Math.min(v + 10, 120); break; } } }
+        for (let i = 0; i < p.length; i += 4) {
+          const l = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+          const negro = oscuro ? l > u : l < u;
+          p[i] = p[i + 1] = p[i + 2] = negro ? 0 : 255; p[i + 3] = 255;
+        }
+        x.putImageData(d, 0, 0); img.src = c.toDataURL('image/png');
+      } catch (e) { /* sin permiso de lectura: se deja la imagen como está */ }
+    };
+    im.src = img.getAttribute('src');
+  }
   let timer = null;
 
   function vacio(ic, titulo, txt) {
@@ -67,6 +92,7 @@
     h += `<p class="nota noprint" style="text-align:center">Actualizado: ${esc(hora(s.actualizado))}</p>`;
     $('#app').innerHTML = h;
     const b = $('#btn-pdf'); if (b) b.onclick = () => window.print();
+    document.querySelectorAll('img.firma').forEach(firmaBlanca);   // v3.90: firmas guardadas con fondo negro
     if (fin && typeof POSTVENTA !== 'undefined') {           // v3.89 · PSR-9: conformidad remota y reclamos
       const pv = document.createElement('div'); pv.id = 'postventa';
       $('#app').insertBefore(pv, $('#app').lastElementChild);
