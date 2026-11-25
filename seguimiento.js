@@ -35,7 +35,9 @@
         x.putImageData(d, 0, 0); img.src = c.toDataURL('image/png');
       } catch (e) { /* sin permiso de lectura: se deja la imagen como está */ }
     };
-    im.src = img.getAttribute('src');
+    // v3.91: se pide la imagen de nuevo (no la guardada por el navegador sin permiso de lectura, que impedía corregirla)
+    const u = img.getAttribute('src') || '';
+    im.src = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'bn=' + Date.now();
   }
   let timer = null;
 
