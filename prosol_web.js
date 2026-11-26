@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v3.93</strong>
+        <strong>Versión PROSOL v3.94</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.93';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v3.94';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -254,7 +254,7 @@ function ir(v) {
   document.querySelectorAll('#nav button').forEach(b => {
     b.classList.toggle('activo', b.dataset.v === v);
   });
-  const fn = VIEWS[v]||VIEWS.dashboard;
+  const fn = (window.PROSOL_WEB_VISTAS||{})[v] || VIEWS[v] || VIEWS.dashboard;   // v3.94: pantallas en lib/web_*.js
   const _err = e => {
     $id('main').innerHTML = '<div class="card"><p style="color:#E74C3C">❌ '+ESC(e.message)+'</p></div>';
   };
@@ -1138,7 +1138,15 @@ window._liqRefrescar = function() { VIEWS.liquidacion(); };
 
 // ── Facturación ──────────────────────────────────────────────────────
 let _factList = [];
+let _cliCod = null;   // v3.94 · W0: facturas/proformas guardan el código del cliente (CLI-…) → nombre
+const _ahoraISO = () => new Date().toISOString();
+async function _cliPorCodigo() {
+  if (!_cliCod) { _cliCod = {}; (await API.select('clientes').catch(() => [])).forEach(c => { _cliCod[c.id_escritorio] = c; _cliCod[c.id] = c; }); }
+  return _cliCod;
+}
+const _cliNom = (r) => r.cliente_nombre || r.razon_social || ((_cliCod || {})[r.id_cliente] || {}).razon_social || '';
 async function _factCargar() {
+  await _cliPorCodigo();
   const est = $id('fact-estado')?.value || 'TODAS';
   const q   = ($id('fact-q')?.value || '').toLowerCase();
   if (!_factList.length || !q) {
@@ -1147,7 +1155,7 @@ async function _factCargar() {
     } catch(e) { return; }
   }
   let ff = est === 'TODAS' ? _factList : _factList.filter(f => f.estado === est);
-  if (q) ff = ff.filter(f => [f.numero, f.numero_ot, f.cliente_nombre, f.serie].some(x => String(x||'').toLowerCase().includes(q)));
+  if (q) ff = ff.filter(f => [f.numero, f.numero_ot, _cliNom(f), f.serie].some(x => String(x||'').toLowerCase().includes(q)));
   const tbody = $id('fact-tbody');
   if (!tbody) return;
   const hoy = _hoyLocal();
@@ -1156,7 +1164,7 @@ async function _factCargar() {
     const color = venc ? '#E74C3C' : (f.estado==='CANCELADA' ? '#117A65' : '');
     return `<tr style="color:${color}">
       <td>${ESC(f.numero||'')}</td><td>${ESC(f.numero_ot||'')}</td>
-      <td>${ESC(f.cliente_nombre||'')}</td><td>${ESC(f.serie||'')}</td>
+      <td>${ESC(_cliNom(f))}</td><td>${ESC(f.serie||'')}</td>
       <td>${ESC(f.fecha_factura||'')}</td><td>${ESC(f.fecha_vence||'—')}</td>
       <td>$${parseFloat(f.total||0).toFixed(2)}</td>
       <td>$${parseFloat(f.pagado||0).toFixed(2)}</td>
@@ -1189,7 +1197,7 @@ function _factDialogo(id) {
         <input id="fv-numot" class="inp-web" value="${ESC(f.numero_ot||'')}" placeholder="N° OT" style="flex:1">
         <button class="btn-web sec" onclick="_factBuscarOT()">Buscar</button>
       </div>
-      <div id="fv-cli-info" style="font-size:11px;color:#117A65;margin-top:2px">${f.cliente_nombre ? '✓ ' + ESC(f.cliente_nombre) : ''}</div>
+      <div id="fv-cli-info" style="font-size:11px;color:#117A65;margin-top:2px">${_cliNom(f) ? '✓ ' + ESC(_cliNom(f)) : ''}</div>
     </div>
     <div><label class="lbl-web">N° de factura</label>
       <input id="fv-num" class="inp-web" value="${ESC(f.numero||'')}"></div>
@@ -1225,8 +1233,8 @@ window._factBuscarOT = async function() {
     if (!o) { const el = $id('fv-cli-info'); if (el) { el.textContent = '✖ OT no encontrada'; el.style.color='#E74C3C'; } return; }
     const clis = await API.select('clientes', {id: o.id_cliente}).catch(()=>[]);
     const c = clis && clis[0];
-    if ($id('fv-idot'))  $id('fv-idot').value  = o.id;
-    if ($id('fv-idcli')) $id('fv-idcli').value = o.id_cliente||'';
+    if ($id('fv-idot'))  $id('fv-idot').value  = o.id_escritorio || o.id;
+    if ($id('fv-idcli')) $id('fv-idcli').value = (c && c.id_escritorio) || o.id_cliente || '';
     if ($id('fv-serie')) $id('fv-serie').value  = o.serie||'';
     if ($id('fv-fectrab')  && !$id('fv-fectrab').value)  $id('fv-fectrab').value  = o.fecha||'';
     if ($id('fv-sub')   && parseFloat($id('fv-sub').value)==0) $id('fv-sub').value = parseFloat(o.valor_total||0).toFixed(2);
@@ -1247,7 +1255,6 @@ window._factGuardar = async function(id) {
     id_ot: $id('fv-idot')?.value || null,
     numero_ot: $id('fv-numot')?.value?.trim() || '',
     id_cliente: idcli,
-    cliente_nombre: ($id('fv-cli-info')?.textContent||'').replace('✓ ',''),
     serie: $id('fv-serie')?.value || '',
     fecha_trabajo: $id('fv-fectrab')?.value || '',
     fecha_factura: $id('fv-fecfact')?.value || '',
@@ -1256,8 +1263,10 @@ window._factGuardar = async function(id) {
     saldo:  id ? undefined : total,
     estado: id ? undefined : 'POR COBRAR',
     plazo_dias: parseInt($id('fv-plazo')?.value||0),
-    observacion: $id('fv-obs')?.value?.trim() || ''
+    observacion: $id('fv-obs')?.value?.trim() || '',
+    actualizado: _ahoraISO(), sync_origen: 'WEB'
   };
+  Object.keys(datos).forEach(k => datos[k] === undefined && delete datos[k]);
   try {
     if (id) { await API.update('facturas', id, datos); }
     else     { await API.insert('facturas', datos); }
@@ -1299,10 +1308,10 @@ window._factRegistrarPago = async function(id) {
   const est = nuevo_sal <= 0 ? 'CANCELADA' : 'PARCIAL';
   try {
     await API.insert('factura_pagos', {
-      id_factura: id, fecha: $id('fp-fec')?.value, forma: $id('fp-forma')?.value,
-      valor: val, referencia: $id('fp-ref')?.value?.trim()
-    }).catch(()=>{});
-    await API.update('facturas', id, {pagado: nuevo_pag, saldo: nuevo_sal, estado: est});
+      id_factura: f.id_escritorio || id, fecha: $id('fp-fec')?.value, forma: $id('fp-forma')?.value,
+      valor: val, referencia: $id('fp-ref')?.value?.trim(), actualizado: _ahoraISO(), sync_origen: 'WEB'
+    });
+    await API.update('facturas', id, {pagado: nuevo_pag, saldo: nuevo_sal, estado: est, actualizado: _ahoraISO(), sync_origen: 'WEB'});
     f.pagado = nuevo_pag; f.saldo = nuevo_sal; f.estado = est;
     cerrarModal(); _factCargar();
     toast('✅ Pago de $' + val.toFixed(2) + ' registrado');
@@ -1316,9 +1325,10 @@ async function _profCargar() {
   const q   = ($id('prof-q')?.value || '').toLowerCase();
   try {
     _profList = await API.select('proformas').catch(() => []);
+    await _cliPorCodigo();
   } catch(e) { return; }
   let ff = est === 'TODAS' ? _profList : _profList.filter(p => p.estado === est);
-  if (q) ff = ff.filter(p => [p.numero, p.razon_social, p.serie].some(x => String(x||'').toLowerCase().includes(q)));
+  if (q) ff = ff.filter(p => [p.numero, _cliNom(p), p.serie].some(x => String(x||'').toLowerCase().includes(q)));
   const tbody = $id('prof-tbody');
   if (!tbody) return;
   tbody.innerHTML = ff.map(p => {
@@ -1326,7 +1336,7 @@ async function _profCargar() {
                   p.estado==='RECHAZADA' ? '#922B21' :
                   p.estado==='EJECUTADA' ? '#2471A3' : '';
     return `<tr style="color:${color}">
-      <td>${ESC(p.numero||'')}</td><td>${ESC(p.razon_social||'—')}</td>
+      <td>${ESC(p.numero||'')}</td><td>${ESC(_cliNom(p)||'—')}</td>
       <td>${ESC(p.serie||'')}</td><td>${ESC(p.fecha||'')}</td>
       <td>$${parseFloat(p.total||0).toFixed(2)}</td>
       <td style="font-size:11px">${ESC(p.estado||'')}</td>
@@ -1458,8 +1468,8 @@ VIEWS.inventario = async ()=>{
         <option value="ACTIVO">Activo</option>
         <option value="INACTIVO">Inactivo</option>
       </select>
-      <button class="btn-web prim" id="btnNuevoInv">➕ Nuevo ítem</button>
     </div>
+    <p style="font-size:12px;color:#666;margin:0 0 6px">📦 Repuestos reales del escritorio (stock por movimientos). Consulta en la web; altas, ingresos y salidas se hacen en el escritorio por ahora.</p>
     <div id="listaInv">Cargando…</div>
   </div>`;
   let inv=await API.select('inventario').catch(()=>[]);
@@ -1483,16 +1493,14 @@ VIEWS.inventario = async ()=>{
         i.stock_minimo||0,
         bajo?`<span style="color:#E74C3C;font-weight:700">⚠ REPONER (faltan ${Number(i.stock_minimo||0)-Number(i.stock||0)})</span>`
             :`<span style="color:#27AE60;font-weight:700">OK</span>`,
-        `<button class="btn-web mini sec" data-iid="${i.id}">✎</button>`];
+        ESC(i.unidad||'')];
     });
-    $id('listaInv').innerHTML=tabla(['Código','Nombre','Categoría','Stock actual','Stock mín.','Estado',''],filas)||'<p style="color:#888;padding:16px">Sin registros.</p>';
-    $id('listaInv').querySelectorAll('[data-iid]').forEach(b=>b.addEventListener('click',()=>_editarInv(b.dataset.iid,inv)));
+    $id('listaInv').innerHTML=tabla(['Código','Nombre','Categoría','Stock actual','Stock mín.','Estado','Unidad'],filas)||'<p style="color:#888;padding:16px">Sin registros.</p>';
   }
   $id('invQ').addEventListener('input',pintar);
   $id('invCat').addEventListener('change',pintar);
   $id('invEst').addEventListener('change',pintar);
   pintar();
-  $id('btnNuevoInv').addEventListener('click',()=>_editarInv(null,inv,async()=>{inv=await API.select('inventario').catch(()=>[]);pintar();}));
 };
 
 function _editarInv(id,inv,onSave){
@@ -1940,7 +1948,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.93</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v3.94</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2558,5 +2566,5 @@ _irConfig = function() {
   const a = document.getElementById('aviso-sin-key'); if(a) a.remove();
   ir('config');
 }
-return { logout, ir, abrirLoginAdmin, irConfig: _irConfig, _cargarActsCatalogo, _waFiltrarOrd: ()=>_waFiltrarOrd&&_waFiltrarOrd(), _waGenerar: ()=>_waGenerar&&_waGenerar(), _reenviarComm: (id)=>{ toast('ℹ Función pendiente de implementar'); }, abrirConfigPanel, cerrarModal };
+return { vistaBase: (v) => VIEWS[v], util: { $id, ESC, toast, modal, cerrarModal, tabla, hoy: () => _hoyLocal() }, logout, ir, abrirLoginAdmin, irConfig: _irConfig, _cargarActsCatalogo, _waFiltrarOrd: ()=>_waFiltrarOrd&&_waFiltrarOrd(), _waGenerar: ()=>_waGenerar&&_waGenerar(), _reenviarComm: (id)=>{ toast('ℹ Función pendiente de implementar'); }, abrirConfigPanel, cerrarModal };
 })();
