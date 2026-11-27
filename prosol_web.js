@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v4.05</strong>
+        <strong>Versión PROSOL v4.05.1</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.05';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.05.1';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -368,7 +368,7 @@ VIEWS.programacion = async () => {
       lugar:[e.ubicacion||c.direccion,c.zona,c.ciudad,(e.gps_lat!=null?'GPS '+e.gps_lat+', '+e.gps_lng:'')].filter(Boolean).join(' · '),
       tipo:p.tipo_mantenimiento||'', novedades:p.observacion||'', contactoCita:p.contacto_cita, telefonoCita:p.telefono_cita,
       contactoEquipo:e.contacto||c.contacto, telefonoEquipo:e.contacto_tel||c.telefono, atendida:p.estado==='EJECUTADA', estado:p.estado,
-      tecnico:asigMap['PROG:'+(p.id_escritorio||p.id)], registro:[p.registrado_por,(p.fecha_registro||'').slice(0,16)].filter(Boolean).join(' · ') };
+      tecnico:asigMap['PROG:'+(p.id_escritorio||p.id)]||p.tecnico_asignado||'', registro:[p.registrado_por,(p.fecha_registro||'').slice(0,16)].filter(Boolean).join(' · ') };
   });
   AGENDA.completar(citas, ord.map(o=>({serie:o.serie, fecha:o.fecha, numero:o.numero_ot, tipo:o.tipo_ot})));
   AGENDA.render($id('agWeb'), citas, { onCita: ci => modal(AGENDA.detalleHTML(ci) +
@@ -1954,7 +1954,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.05</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.05.1</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');

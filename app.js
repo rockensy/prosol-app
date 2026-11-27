@@ -2820,7 +2820,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v4.05";
+const APP_VERSION = "v4.05.1";
 async function init() {
   // v3.70: pedir al navegador que NO borre solo los datos de la app (órdenes y fotos sin enviar)
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()); } catch (e) {}
@@ -3083,8 +3083,10 @@ function initSupabase() {
         ID_CLIENTE: p.id_cliente,
         FECHA_PROGRAMADA: p.fecha_programada || '',
         TIPO_MANTENIMIENTO: p.tipo_mantenimiento || '',
-        OBSERVACION: p.observacion || '', ESTADO: p.estado || 'PROGRAMADA'
+        OBSERVACION: p.observacion || '', ESTADO: p.estado || 'PROGRAMADA',
+        TECNICO_ASIGNADO: p.tecnico_asignado || ''   // v4.05.1: técnico asignado en el escritorio o la web
       }));
+      if (window.PROSOL_ASIG) { PROSOL_ASIG.completar(); PROSOL_ASIG.refrescar(true); }
 
       // 5. Actividades y combos desde Supabase
       // TODAS las actividades (COMBO e INDIVIDUAL) van al selector de tipo
