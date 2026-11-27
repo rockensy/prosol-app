@@ -2820,7 +2820,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v3.99.1";
+const APP_VERSION = "v3.99.2";
 async function init() {
   // v3.70: pedir al navegador que NO borre solo los datos de la app (órdenes y fotos sin enviar)
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()); } catch (e) {}
@@ -2986,14 +2986,16 @@ function initSupabase() {
       toastG('☁ Descargando las 6 tablas desde Supabase…', '');
       // M9-A: primero se suben los datos de equipo completados en el móvil
       if (window._prosolSubirEdicionesEquipo) { try { await window._prosolSubirEdicionesEquipo(); } catch (x) {} }
-      const [eq, cli, tec, prog, acts, actItems, ots, eqCampo] = await Promise.all([
+      let [eq, cli, tec, prog, acts, actItems, ots, eqCampo] = await Promise.all([
         API.select('equipos').catch(() => []),
         API.select('clientes').catch(() => []),
         API.select('tecnicos').catch(() => []),
         API.select('visitas_programadas').catch(() => []),
         API.select('actividades').catch(() => []),
         API.select('actividad_items').catch(() => []),
-        API.select('ordenes').catch(() => []),
+        // v3.99.2: solo las últimas N OT (o desde una fecha) que define el ADMIN en la web; antes bajaban todas
+        API.rpc('historial_movil', {}).then((r) => { window._prosolCfgMovil = { max: r.max, desde: r.desde }; return r.ots || []; })
+          .catch(() => API.select('ordenes').catch(() => [])),
         API.select('equipos_campo').catch(() => [])
       ]);
 
@@ -3065,6 +3067,13 @@ function initSupabase() {
       }));
 
       // 4. Visitas programadas
+      // v3.99.2: van todas las visitas por atender; las ya atendidas solo las últimas N (informativas), como el historial
+      const _cfgM = window._prosolCfgMovil || { max: 50, desde: null };
+      const _hecha = (p) => ['EJECUTADA', 'REALIZADA'].includes(String(p.estado || '').toUpperCase());
+      const _hechas = prog.filter(p => _hecha(p) && (!_cfgM.desde || String(p.fecha_programada || '') >= _cfgM.desde))
+        .sort((x, y) => String(y.fecha_programada || '').localeCompare(String(x.fecha_programada || ''))).slice(0, _cfgM.max || 50);
+      prog = prog.filter(p => !_hecha(p)).concat(_hechas);
+      _e.catalogo.movil_cfg = { max: _cfgM.max || 50, desde: _cfgM.desde || null };
       _e.catalogo.programaciones = prog.filter(p => (p.estado || '') !== 'CANCELADA').map(p => ({   // v3.68: sin canceladas
         HORA: p.hora || '', CONTACTO_CITA: p.contacto_cita || '', TELEFONO_CITA: p.telefono_cita || '',
         REGISTRADO_POR: p.registrado_por || '', FECHA_REGISTRO: p.fecha_registro || '',
