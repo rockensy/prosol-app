@@ -511,3 +511,10 @@ body.modo-admin #syncbar,body.modo-admin #app,body.modo-admin #tabbar,body.modo-
 .hc-asig.sin { color: #A04000; }
 /* v3.61: acciones en Programaciones */
 .prog-acc .btn{flex:1;padding:7px 8px;font-size:.78rem;min-height:0;line-height:1.15;white-space:normal}
+/* v4.03 · menú de la web PC: fila propia a todo el ancho, opciones ordenadas en filas horizontales (columnas iguales) */
+@media(min-width:700px){
+  .topbar{flex-wrap:wrap}
+  .nav-pc{order:9;flex:1 0 100%;display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));
+    gap:4px 6px;padding:6px 0 2px;border-top:1px solid #ffffff1f}
+  .nav-pc button{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
