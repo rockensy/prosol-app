@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v4.05.3</strong>
+        <strong>Versión PROSOL v4.05.4</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.05.3';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.05.4';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -382,12 +382,15 @@ VIEWS.programacion = async () => {
     }).sort((a,b)=>(a.fecha_programada||'').localeCompare(b.fecha_programada||''))
       .map(p=>{
         const e=eqMap[p.id_equipo]||{}, c=cliMap[p.id_cliente]||{};
-        const venc=p.fecha_programada&&p.fecha_programada<hoy;
-        const col=venc?'#E74C3C':p.estado==='EJECUTADA'?'#27AE60':'#1C2733';
+        // v4.05.4: rojo con ⚠ solo las visitas NO atendidas (misma regla del calendario); ejecutadas en verde y sin «+ OT»
+        const est=(p.estado||'PROGRAMADA').toUpperCase(), f=String(p.fecha_programada||'').slice(0,10);
+        const atendida=['EJECUTADA','REALIZADA'].includes(est);
+        const venc=!atendida&&!!f&&(f<hoy||(est==='NO_REALIZADA'&&f<=hoy));
+        const col=venc?'#E74C3C':atendida?'#27AE60':'#1C2733';
         return [`<span style="color:${col};font-weight:${venc?700:400}">${ESC(p.fecha_programada||'—')}${p.hora?' '+ESC(p.hora):''}${venc?' ⚠':''}</span>`,
           ESC(e.nombre_equipo||p.serie||'—'),ESC(e.codigo||'—'),ESC(c.razon_social||'—'),
-          ESC(p.tipo_mantenimiento||'—'),`<span style="color:${col};font-weight:700">${ESC(p.estado||'PROGRAMADA')}</span>`,
-          `<button class="btn-web mini prim" data-pid="${p.id}">+ OT</button>`];
+          ESC(p.tipo_mantenimiento||'—'),`<span style="color:${col};font-weight:700">${ESC(est)}${venc&&est!=='NO_REALIZADA'?' · no realizada':''}</span>`,
+          atendida?'<span style="color:#27AE60">✔ atendida</span>':`<button class="btn-web mini prim" data-pid="${p.id}">+ OT</button>`];
       });
     const lista=$id('lista'); if(!lista) return;
     lista.innerHTML = tabla(['Fecha','Equipo','Código','Cliente','Tipo','Estado',''],filas);
@@ -1954,7 +1957,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.05.3</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.05.4</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
