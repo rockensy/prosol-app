@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v4.07</strong>
+        <strong>Versión PROSOL v4.08</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.07';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.08';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -1957,7 +1957,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.07</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.08</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');
@@ -2450,6 +2450,12 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
       if(existentes && existentes.length){
         // Ya existe → actualizar la primera, no crear otra
         const idExist=existentes[0].id;
+        // v4.08: una OT liquidada o facturada no se toca; al editar no cambia su origen y queda marcada para el escritorio
+        const bloq=await API.rpc('ots_bloqueadas',{}).then(L=>(L||[]).find(x=>String(x.numero_ot)===numOT)).catch(()=>null);
+        if(bloq){ toast('⛔ La OT '+numOT+' está en '+bloq.motivo+': no se puede modificar'); return; }
+        if(existentes[0].origen && existentes[0].origen!=='CAMPO'){ delete row.origen; }
+        row.editado_web=new Date().toISOString();
+        try{ const _s=(API.sesionNube&&API.sesionNube())||window._prosolSesion||{}; row.editado_por=_s.usuario||_s.nombre||'web'; }catch(e){}
         // v3.58: al editar, las fotos que la orden ya tenía se conservan; las nuevas se agregan (antes se reemplazaban)
         if(row.hasOwnProperty('ot_fotos')){
           let prev=existentes[0].ot_fotos; if(typeof prev==='string'){ try{prev=JSON.parse(prev);}catch(e){prev=[];} }
@@ -2463,6 +2469,7 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
         await API.remove('ot_actividades',{id_orden:'eq.'+idExist}).catch(()=>{});
       }else{
         nuevaOT=await _guardarConReintento(()=>API.insert('ordenes',row));
+        if(nuevaOT&&!Array.isArray(nuevaOT)) nuevaOT=[nuevaOT];   // v4.08: API.insert devuelve la fila (antes las actividades de una OT nueva no se guardaban)
       }
       // Insertar actividades
       if(actsGuardar.length&&nuevaOT&&nuevaOT[0]){
@@ -2472,6 +2479,27 @@ async function _formNuevaOT(prefill,eq,cli,tec,onSave,acts,actItems){
             cantidad:a.cantidad,valor:a.valor,nivel:a.nivel}).catch(()=>{});
         }
       }
+      // v4.08 · P6: si el tipo es un COMBO, se cargan sus insumos (igual que el escritorio), salvo que el equipo ya tenga
+      // una visita con insumos esa fecha (no se duplican).
+      try{
+        const idOrd=nuevaOT&&nuevaOT[0]&&nuevaOT[0].id;
+        const combo=tipoOpt&&(acts||[]).find(a=>a.id===tipoOpt.value&&a.tipo==='COMBO');
+        if(idOrd&&combo&&combo.id_escritorio){
+          const yaRep=await API.select('ot_repuestos',{id_orden:'eq.'+idOrd}).catch(()=>[]);
+          let conVisita=false;
+          if(row.serie){
+            const vis=(await API.select('visitas_programadas',{serie:'eq.'+row.serie}).catch(()=>[])).filter(v=>String(v.fecha_programada||'').slice(0,10)===row.fecha);
+            for(const v of vis){ const vr=await API.select('visita_repuestos',{id_visita:'eq.'+v.id_escritorio}).catch(()=>[]); if(vr.some(x=>x.estado_ins!=='ANULADO')){conVisita=true;break;} }
+          }
+          if(!yaRep.length&&!conVisita){
+            const rec=(await API.select('recetas_insumos',{id_actividad:'eq.'+combo.id_escritorio}).catch(()=>[])).filter(r=>(r.estado||'ACTIVO')==='ACTIVO');
+            const reps=rec.length?await API.select('repuestos').catch(()=>[]):[]; const R={}; reps.forEach(r=>R[r.id_escritorio]=r);
+            for(const r of rec){ await API.insert('ot_repuestos',{id_orden:idOrd,id_repuesto:r.id_repuesto,descripcion:(R[r.id_repuesto]||{}).descripcion||'',
+              cantidad:Number(r.cantidad)||1,valor:0,movimiento:'DESCARGA',contabiliza:0,origen:'COMBO'}).catch(()=>{}); }
+            if(rec.length) toast('📦 '+rec.length+' insumo(s) del combo cargados a la OT');
+          }
+        }
+      }catch(e){}
       cerrarModal();toast('✅ OT guardada');if(onSave)onSave();
     }catch(e){toast('❌ '+e.message);}
   });
@@ -2575,5 +2603,5 @@ _irConfig = function() {
   const a = document.getElementById('aviso-sin-key'); if(a) a.remove();
   ir('config');
 }
-return { vistaBase: (v) => VIEWS[v], util: { $id, ESC, toast, modal, cerrarModal, tabla, hoy: () => _hoyLocal() }, logout, ir, abrirLoginAdmin, irConfig: _irConfig, _cargarActsCatalogo, _waFiltrarOrd: ()=>_waFiltrarOrd&&_waFiltrarOrd(), _waGenerar: ()=>_waGenerar&&_waGenerar(), _reenviarComm: (id)=>{ toast('ℹ Función pendiente de implementar'); }, abrirConfigPanel, cerrarModal };
+return { formNuevaOT: (...a) => _formNuevaOT(...a), vistaBase: (v) => VIEWS[v], util: { $id, ESC, toast, modal, cerrarModal, tabla, hoy: () => _hoyLocal() }, logout, ir, abrirLoginAdmin, irConfig: _irConfig, _cargarActsCatalogo: () => _cargarActsCatalogo && _cargarActsCatalogo(), _waFiltrarOrd: ()=>_waFiltrarOrd&&_waFiltrarOrd(), _waGenerar: ()=>_waGenerar&&_waGenerar(), _reenviarComm: (id)=>{ toast('ℹ Función pendiente de implementar'); }, abrirConfigPanel, cerrarModal };
 })();
