@@ -105,7 +105,7 @@ function mostrarLogin() {
       <div style="text-align:center;margin-top:16px;font-size:.74rem;color:#8899AA;line-height:1.7">
         ROCKENSY S.A. &amp; MIG<br>
         Tec. Master Luis Martinez Ibáñez · Cel: 096 701 5684<br>
-        <strong>Versión PROSOL v4.05.5</strong>
+        <strong>Versión PROSOL v4.06</strong>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -213,7 +213,7 @@ function arrancarApp(sesion) {
   const ub = $id('userBadge');
   if(ub) ub.textContent = (sesion.nombre||sesion.usuario||'Admin')+' · '+(sesion.perfil||'ADMIN');
 
-  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.05.5';
+  if($id('footerVersion')) $id('footerVersion').textContent = 'Versión PROSOL v4.06';
 
   // Menú — solo módulos reales del escritorio PROSOL
   // Orden del menú PROSOL — igual que escritorio
@@ -382,7 +382,7 @@ VIEWS.programacion = async () => {
     }).sort((a,b)=>(a.fecha_programada||'').localeCompare(b.fecha_programada||''))
       .map(p=>{
         const e=eqMap[p.id_equipo]||{}, c=cliMap[p.id_cliente]||{};
-        // v4.05.5: rojo con ⚠ solo las visitas NO atendidas (misma regla del calendario); ejecutadas en verde y sin «+ OT»
+        // v4.06: rojo con ⚠ solo las visitas NO atendidas (misma regla del calendario); ejecutadas en verde y sin «+ OT»
         const est=(p.estado||'PROGRAMADA').toUpperCase(), f=String(p.fecha_programada||'').slice(0,10);
         const atendida=['EJECUTADA','REALIZADA'].includes(est);
         const venc=!atendida&&!!f&&(f<hoy||(est==='NO_REALIZADA'&&f<=hoy));
@@ -1957,7 +1957,7 @@ VIEWS.config = async ()=>{
     <h3>ℹ App Móvil</h3>
     <p style="font-size:13px">URL: <b>https://rockensy.github.io/prosol-app/</b></p>
     <p style="font-size:13px">Usa las mismas credenciales Supabase que el sistema de escritorio.</p>
-    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.05.5</b></p>
+    <p style="font-size:12px;color:#888;margin-top:4px">Versión actual: <b>PROSOL v4.06</b></p>
   </div>`;
   $id('cfgGuardar').addEventListener('click',()=>{
     const url=($id('cfgUrl').value||'').trim().replace(/\/+$/,'');

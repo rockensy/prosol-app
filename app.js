@@ -2820,7 +2820,7 @@ function escucharArchivosEntrantes() {
 }
 
 // ---------- Arranque ----------
-const APP_VERSION = "v4.05.5";
+const APP_VERSION = "v4.06";
 async function init() {
   // v3.70: pedir al navegador que NO borre solo los datos de la app (órdenes y fotos sin enviar)
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()); } catch (e) {}
