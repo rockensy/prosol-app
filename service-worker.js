@@ -1,5 +1,5 @@
 /* PROSOL Campo · service worker — cachea la app para uso sin internet. */
-const CACHE = "prosol-campo-v99";
+const CACHE = "prosol-campo-v101";
 const ASSETS = [
   "./index.html",
   "./style.css",
@@ -30,6 +30,8 @@ const ASSETS = [
   "./lib/web_inventario.js",
   "./lib/web_expedientes.js",
   "./lib/web_facturacion.js",
+  "./lib/web_exp_modulos.js",
+  "./lib/web_panel_reportes.js",
   "./lib/prog_atendidas.js",
   "./lib/seg_cerrada.js",
   "./lib/ot_unica.js",
